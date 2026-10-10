@@ -53,6 +53,10 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
         try:
             yield session
             await session.commit()
+        except ApplicationHandlerStop:
+            # Detener la cadena de handlers no es un error: hay que guardar lo hecho.
+            await session.commit()
+            raise
         except Exception:
             await session.rollback()
             raise
