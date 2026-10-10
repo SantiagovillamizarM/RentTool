@@ -112,6 +112,7 @@ def order_summary(lines: list, total) -> str:
         return NO_ORDER
     rows = ["Pedido sugerido:"]
     for line in lines:
-        rows.append(f"• {line.cases} cajas {line.name} — {line.reason}")
+        word = "caja" if line.cases == 1 else "cajas"
+        rows.append(f"• {line.cases} {word} {line.name} — {line.reason}")
     rows.append(f"Total: {cop(total)} COP")
     return "\n".join(rows)

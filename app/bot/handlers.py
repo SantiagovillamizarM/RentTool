@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -42,6 +43,8 @@ MAX_VOICE_SECONDS = 120
 PENDING_TTL = timedelta(minutes=15)
 
 _chat_hits: dict[int, deque[float]] = defaultdict(deque)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -516,3 +519,162 @@ async def handle_cancel_stock(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         await session.delete(pending)
     await _reply(update, texts.CANCELLED)
+
+
+KIND_ORDER = "order"
+
+
+async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        analysis = await load_store_analysis(session, store.id)
+    if analysis is None or not any(p.has_count for p in analysis.products):
+        await _reply(update, texts.NO_STOCK)
+        return
+    products = sorted(analysis.products, key=lambda p: (not p.has_count, p.name))
+    await _reply(update, texts.stock_list(products))
+
+
+async def handle_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        analysis = await load_store_analysis(session, store.id)
+    if analysis is None:
+        await _reply(update, texts.NO_STORE)
+        return
+    await _reply(update, texts.alerts_list(analysis.at_risk, analysis.stagnant))
+
+
+async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        analysis = await load_store_analysis(session, store.id)
+        if analysis is None or not analysis.order_lines:
+            await _reply(update, texts.NO_ORDER)
+            return
+        payload_lines = [
+            {"product_id": line.product_id, "cases": line.cases, "units": line.units, "reason": line.reason}
+            for line in analysis.order_lines
+        ]
+        await replace_pending(session, store.id, KIND_ORDER, {"lines": payload_lines})
+    await _reply(
+        update,
+        texts.order_summary(analysis.order_lines, analysis.order_total),
+        reply_markup=keyboards.send_order_keyboard(),
+    )
+
+
+async def handle_send_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _answer_callback(update)
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        pending = await get_pending(session, store.id, KIND_ORDER)
+        if pending is None:
+            await _reply(update, texts.NOTHING_PENDING)
+            return
+        valid_ids = {p.id for p in await load_active_products(session, store.distributor_id)}
+        order = SuggestedOrder(store_id=store.id, status="sent")
+        for line in pending.payload.get("lines") or []:
+            product_id = int(line.get("product_id") or 0)
+            cases = int(line.get("cases") or 0)
+            if product_id not in valid_ids or cases <= 0:
+                continue
+            order.items.append(
+                SuggestedOrderItem(
+                    product_id=product_id,
+                    cases=cases,
+                    units=int(line.get("units") or 0),
+                    reason=str(line.get("reason") or "")[:240],
+                )
+            )
+        await session.delete(pending)
+        if not order.items:
+            await _reply(update, texts.NO_ORDER)
+            return
+        session.add(order)
+    await _reply(update, texts.ORDER_SENT)
+
+
+async def handle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        order = await session.scalar(
+            select(SuggestedOrder)
+            .where(SuggestedOrder.store_id == store.id, SuggestedOrder.status == "sent")
+            .order_by(SuggestedOrder.created_at.desc(), SuggestedOrder.id.desc())
+        )
+        if order is None:
+            await _reply(update, texts.NO_SENT_ORDER)
+            return
+        items = (
+            await session.scalars(select(SuggestedOrderItem).where(SuggestedOrderItem.order_id == order.id))
+        ).all()
+        now = datetime.now(UTC)
+        for item in items:
+            if item.units > 0:
+                session.add(
+                    Receipt(store_id=store.id, product_id=item.product_id, quantity=item.units, received_at=now)
+                )
+        order.status = "received"
+    await _reply(update, texts.ORDER_RECEIVED)
+
+
+async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _reply(update, texts.HELP)
+
+
+async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _reply(update, texts.UNKNOWN)
+
+
+async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Solo el tipo de error: nunca el contenido del mensaje ni datos del tendero.
+    logger.error("Error procesando update: %s", type(context.error).__name__, exc_info=context.error)
+    if isinstance(update, Update):
+        try:
+            await _reply(update, texts.GEMINI_FAIL)
+        except Exception:
+            logger.warning("No se pudo avisar el error al chat")
+
+
+def register_handlers(application: Application) -> None:
+    text_only = filters.TEXT & ~filters.COMMAND
+
+    # Grupo -1: rate limit antes que todo (lanza ApplicationHandlerStop si se pasa).
+    application.add_handler(TypeHandler(Update, check_rate_limit), group=-1)
+
+    # Grupo 0: comandos, botones, voz, foto y código de vinculación.
+    application.add_handler(CommandHandler("start", handle_start))
+    application.add_handler(CommandHandler("stock", handle_stock))
+    application.add_handler(CommandHandler("alertas", handle_alerts))
+    application.add_handler(CommandHandler("pedido", handle_order))
+    application.add_handler(CommandHandler("recibido", handle_received))
+    application.add_handler(CommandHandler("ayuda", handle_help))
+    application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
+    application.add_handler(CallbackQueryHandler(handle_consent, pattern=f"^{keyboards.ACCEPT_CONSENT}$"))
+    application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=f"^{keyboards.CONFIRM_SALES}$"))
+    application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=f"^{keyboards.CANCEL_SALES}$"))
+    application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=f"^{keyboards.CONFIRM_STOCK}$"))
+    application.add_handler(CallbackQueryHandler(handle_cancel_stock, pattern=f"^{keyboards.CANCEL_STOCK}$"))
+    application.add_handler(CallbackQueryHandler(handle_send_order, pattern=f"^{keyboards.SEND_ORDER}$"))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(text_only, handle_link_code))
+
+    # Grupo 1: texto de una tienda ya vinculada (ventas o corrección de conteo).
+    application.add_handler(MessageHandler(text_only, handle_text), group=1)
+
+    # Grupo 2: si nadie lo entendió, respuesta amable con ejemplos.
+    application.add_handler(MessageHandler(text_only, handle_unknown), group=2)
+
+    application.add_error_handler(handle_error)

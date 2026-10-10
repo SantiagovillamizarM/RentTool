@@ -152,13 +152,19 @@ async def seed(session: AsyncSession) -> None:
     start = today - timedelta(days=59)
     rng = random.Random(SEED)
 
+    count_rng = random.Random(SEED + 1)
+    count_cutoff = today - timedelta(days=1)
+
     for store in stores:
+        recent_units: dict[str, int] = {sku: 0 for sku in products}
         for offset in range(60):
             sold_at = start + timedelta(days=offset)
             for sku, product in products.items():
                 quantity = daily_quantity(sku, sold_at, rng)
                 if quantity <= 0:
                     continue
+                if sold_at > count_cutoff - timedelta(days=28):
+                    recent_units[sku] += quantity
                 session.add(
                     Sale(
                         store_id=store.id,
@@ -169,16 +175,20 @@ async def seed(session: AsyncSession) -> None:
                         source="manual",
                     )
                 )
-        counted_at = start - timedelta(hours=2)
+        # Conteo de ayer en la noche: así el stock refleja solo las ventas de hoy.
+        counted_at = count_cutoff.replace(hour=21)
         for sku, product in products.items():
+            daily = recent_units[sku] / 28
             if sku == STAGNANT_SKU:
                 quantity = 18
             elif sku == WEEKEND_SKU:
-                quantity = 4
+                quantity = 2
             elif sku == GROWING_SKU:
-                quantity = 6
+                quantity = max(1, round(daily * 1.5))
             else:
-                quantity = 24
+                # Días de cobertura variados: unos casi agotados, otros sobrados.
+                cover_days = count_rng.choice([1, 2, 3, 5, 8, 12, 20, 60])
+                quantity = max(0, round(daily * cover_days))
             session.add(
                 StockCount(
                     store_id=store.id,
