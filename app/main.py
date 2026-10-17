@@ -2,13 +2,17 @@ import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 from telegram import Update
 from telegram.ext import Application
 
 from app.bot.handlers import register_handlers
 from app.config import get_settings
+from app.web.routes import router as panel_router
 
 settings = get_settings()
 
@@ -70,6 +74,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="TenderoBot", version="0.1.0", lifespan=lifespan)
+
+# Panel web: sesión en cookie firmada (HttpOnly por defecto en Starlette), 8 horas.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    session_cookie="tenderobot_session",
+    max_age=8 * 60 * 60,
+    same_site="lax",
+    https_only=settings.public_base_url.startswith("https"),
+)
+app.include_router(panel_router)
+app.mount(
+    "/panel/static",
+    StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
+    name="panel_static",
+)
 
 
 @app.get("/health")

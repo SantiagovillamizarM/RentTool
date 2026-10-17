@@ -98,8 +98,10 @@ async def seed(session: AsyncSession) -> None:
         if store_ids:
             await session.execute(delete(Sale).where(Sale.store_id.in_(store_ids)))
             await session.execute(delete(StockCount).where(StockCount.store_id.in_(store_ids)))
-        await session.execute(delete(Product).where(Product.distributor_id == existing.id))
+        # Las tiendas primero: su borrado en cascada se lleva recibos, pedidos y borradores,
+        # que apuntan a productos con RESTRICT.
         await session.execute(delete(Store).where(Store.distributor_id == existing.id))
+        await session.execute(delete(Product).where(Product.distributor_id == existing.id))
         await session.execute(
             delete(DistributorUser).where(DistributorUser.distributor_id == existing.id)
         )

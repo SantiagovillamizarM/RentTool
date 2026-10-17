@@ -1,6 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 ACCEPT_CONSENT = "consent:accept"
+REJECT_CONSENT = "consent:reject"
 CONFIRM_SALES = "sales:confirm"
 CANCEL_SALES = "sales:cancel"
 CONFIRM_STOCK = "stock:confirm"
@@ -10,7 +11,12 @@ SEND_ORDER = "order:send"
 
 def consent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Acepto", callback_data=ACCEPT_CONSENT)]]
+        [
+            [
+                InlineKeyboardButton("✅ Acepto", callback_data=ACCEPT_CONSENT),
+                InlineKeyboardButton("❌ No acepto", callback_data=REJECT_CONSENT),
+            ]
+        ]
     )
 
 

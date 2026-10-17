@@ -101,6 +101,26 @@ async def check_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     raise ApplicationHandlerStop
 
 
+async def require_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mientras el chat no tenga tienda, solo se aceptan /start y el código (texto)."""
+    chat_id = _chat_id(update)
+    if chat_id is None:
+        return
+    async with session_scope() as session:
+        if await get_store_by_chat(session, chat_id) is not None:
+            return
+    message = update.message
+    if message is not None and message.text:
+        is_command = message.text.startswith("/")
+        if not is_command or message.text.split()[0].split("@")[0].lower() == "/start":
+            return
+    query = update.callback_query
+    if query is not None:
+        await query.answer()
+    await _reply(update, texts.ASK_STORE)
+    raise ApplicationHandlerStop
+
+
 async def get_store_by_chat(session: AsyncSession, chat_id: int) -> Store | None:
     return await session.scalar(select(Store).where(Store.telegram_chat_id == chat_id))
 
@@ -131,7 +151,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if store.consent_at is None:
             await _reply(update, texts.CONSENT_NOTICE, reply_markup=keyboards.consent_keyboard())
             return
-        await _reply(update, texts.ALREADY_LINKED)
+        await _reply(update, texts.START_LINKED)
 
 
 async def handle_link_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -179,6 +199,41 @@ async def handle_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if store.consent_at is None:
             store.consent_at = datetime.now(UTC)
         await _reply(update, texts.WELCOME.format(owner=store.owner_name))
+    await _remove_buttons(update)
+
+
+async def handle_reject_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """No acepta: se desvincula el chat y vuelve al paso del código."""
+    query = update.callback_query
+    if query is None:
+        return
+    await query.answer()
+    chat_id = _chat_id(update)
+    if chat_id is None:
+        return
+    async with session_scope() as session:
+        store = await get_store_by_chat(session, chat_id)
+        if store is None:
+            await _reply(update, texts.NEED_LINK)
+            return
+        if store.consent_at is not None:
+            # Botón viejo de un aviso ya aceptado: no se desvincula por accidente.
+            await _reply(update, texts.CONSENT_ALREADY)
+            return
+        store.telegram_chat_id = None
+    await _remove_buttons(update)
+    await _reply(update, texts.CONSENT_REJECTED)
+
+
+async def _remove_buttons(update: Update) -> None:
+    """Quita los botones del aviso para que no se pulsen dos veces."""
+    query = update.callback_query
+    if query is None:
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        logger.info("No se pudieron quitar los botones del aviso")
 
 
 KIND_SALES = "sales"
@@ -654,8 +709,11 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 def register_handlers(application: Application) -> None:
     text_only = filters.TEXT & ~filters.COMMAND
 
-    # Grupo -1: rate limit antes que todo (lanza ApplicationHandlerStop si se pasa).
-    application.add_handler(TypeHandler(Update, check_rate_limit), group=-1)
+    # Grupo -2: rate limit antes que todo (lanza ApplicationHandlerStop si se pasa).
+    application.add_handler(TypeHandler(Update, check_rate_limit), group=-2)
+
+    # Grupo -1: sin tienda vinculada solo pasan /start y el código.
+    application.add_handler(TypeHandler(Update, require_link), group=-1)
 
     # Grupo 0: comandos, botones, voz, foto y código de vinculación.
     application.add_handler(CommandHandler("start", handle_start))
@@ -666,6 +724,9 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("ayuda", handle_help))
     application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
     application.add_handler(CallbackQueryHandler(handle_consent, pattern=f"^{keyboards.ACCEPT_CONSENT}$"))
+    application.add_handler(
+        CallbackQueryHandler(handle_reject_consent, pattern=f"^{keyboards.REJECT_CONSENT}$")
+    )
     application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=f"^{keyboards.CONFIRM_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=f"^{keyboards.CANCEL_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=f"^{keyboards.CONFIRM_STOCK}$"))

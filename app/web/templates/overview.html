@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Resumen{% endblock %}
+{% block content %}
+<h1>Resumen</h1>
+<div class="kpis">
+  <div class="kpi">
+    <span class="kpi-label">Tiendas activas</span>
+    <span class="kpi-value">{{ stores_linked }} / {{ stores_total }}</span>
+    <span class="kpi-note">vinculadas al bot</span>
+  </div>
+  <div class="kpi {{ 'kpi-risk' if stores_at_risk }}">
+    <span class="kpi-label">Tiendas en riesgo de quiebre</span>
+    <span class="kpi-value">{{ stores_at_risk }}</span>
+    <span class="kpi-note">con al menos un producto por agotarse</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Pedidos pendientes</span>
+    <span class="kpi-value">{{ sent_value|cop }}</span>
+    <span class="kpi-note">{{ sent_count }} pedido{{ '' if sent_count == 1 else 's' }} enviado{{ '' if sent_count == 1 else 's' }} por despachar</span>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Productos con más tiendas en riesgo</h2>
+  {% if top_risk %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Producto</th><th class="num">Tiendas en riesgo</th></tr></thead>
+      <tbody>
+        {% for row in top_risk %}
+        <tr><td>{{ row.name }}</td><td class="num">{{ row.stores_at_risk }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Ningún producto en riesgo por ahora.</p>
+  {% endif %}
+</section>
+{% endblock %}

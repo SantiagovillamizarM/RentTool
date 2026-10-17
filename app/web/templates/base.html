@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Panel{% endblock %} · TenderoBot</title>
+  <link rel="stylesheet" href="/panel/static/panel.css">
+</head>
+<body>
+  {% if active is defined %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/panel">TenderoBot <span>· Panel</span></a>
+      <nav class="menu">
+        <a href="/panel" class="{{ 'on' if active == 'overview' }}">Resumen</a>
+        <a href="/panel/tiendas" class="{{ 'on' if active == 'stores' }}">Tiendas</a>
+        <a href="/panel/demanda" class="{{ 'on' if active == 'demand' }}">Demanda</a>
+      </nav>
+      <form method="post" action="/panel/logout" class="logout">
+        <button type="submit">Salir</button>
+      </form>
+    </div>
+  </header>
+  {% endif %}
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

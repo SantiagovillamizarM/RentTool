@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ store.name }}{% endblock %}
+{% block content %}
+<p class="crumb"><a href="/panel/tiendas">← Tiendas</a></p>
+<h1>{{ store.name }}</h1>
+<p class="muted">{{ store.owner_name }} · próxima entrega en {{ analysis.horizon_days }} día{{ '' if analysis.horizon_days == 1 else 's' }}</p>
+
+<section class="card">
+  <h2>Unidades vendidas por día (últimos 28 días)</h2>
+  <div class="chart-box"><canvas id="sales-chart" aria-label="Unidades vendidas por día" role="img"></canvas></div>
+  <script type="application/json" id="sales-data">{{ chart|tojson }}</script>
+</section>
+
+<section class="card">
+  <h2>Pedido sugerido</h2>
+  {% if analysis.order_lines %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Producto</th><th class="num">Cajas</th><th class="num">Unidades</th><th>Motivo</th><th class="num">Subtotal</th></tr></thead>
+      <tbody>
+        {% for line in analysis.order_lines %}
+        <tr>
+          <td>{{ line.name }}</td>
+          <td class="num">{{ line.cases }}</td>
+          <td class="num">{{ line.units }}</td>
+          <td>{{ line.reason }}</td>
+          <td class="num">{{ line.subtotal|cop }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr><td colspan="4">Total</td><td class="num">{{ analysis.order_total|cop }}</td></tr></tfoot>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No hace falta pedir nada por ahora.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Productos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Venta diaria</th><th class="num">Cobertura</th><th>ABC</th><th>Estado</th></tr></thead>
+      <tbody>
+        {% for p in products %}
+        {% set state = product_status(p) %}
+        <tr>
+          <td>{{ p.name }}{% if not p.has_count %} <span class="muted small">(sin conteo)</span>{% endif %}</td>
+          <td class="num">{{ p.stock }}</td>
+          <td class="num">{{ p.daily_sales|qty }}</td>
+          <td class="num">{{ p.coverage_days|coverage }}</td>
+          <td><span class="abc abc-{{ p.abc_class|lower }}">{{ p.abc_class }}</span></td>
+          <td>
+            {% if state == 'Riesgo' %}<span class="badge badge-risk">Riesgo</span>
+            {% elif state == 'Estancado' %}<span class="badge badge-stale">Estancado</span>
+            {% else %}<span class="badge badge-ok">OK</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Pedidos enviados</h2>
+  {% if sent_orders %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th class="num">Valor</th></tr></thead>
+      <tbody>
+        {% for order in sent_orders %}
+        <tr><td>{{ order.created_at|local_dt }}</td><td class="num">{{ order.value|cop }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Esta tienda no tiene pedidos enviados pendientes.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var data = JSON.parse(document.getElementById("sales-data").textContent);
+    var canvas = document.getElementById("sales-chart");
+    if (!window.Chart || !canvas) { return; }
+    new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: data.labels,
+        datasets: [{
+          label: "Unidades",
+          data: data.values,
+          borderColor: "#0B1F3A",
+          backgroundColor: "rgba(11, 31, 58, 0.08)",
+          pointBackgroundColor: "#E0A100",
+          pointRadius: 3,
+          borderWidth: 2,
+          tension: 0.25,
+          fill: true
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0 } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}
