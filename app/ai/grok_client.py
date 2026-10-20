@@ -1,23 +1,34 @@
+"""Cliente de Grok (API compatible con OpenAI del reto).
+
+Grok solo extrae datos: voz, texto o foto → JSON. Ningún cálculo se hace aquí.
+- Voz: /stt la transcribe a texto y luego se extrae como si fuera texto.
+- Texto y foto: /chat/completions con salida JSON según un esquema.
+"""
+
+import base64
 import json
 from typing import Any
 
-from google import genai
-from google.genai import types
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.ai.prompts import (
+    ORDER_CHANGES_RESPONSE_SCHEMA,
     SALES_RESPONSE_SCHEMA,
     STOCK_RESPONSE_SCHEMA,
+    order_changes_prompt,
     sales_prompt,
     stock_prompt,
 )
 from app.config import get_settings
-from app.schemas import SaleLine, StockLine
+from app.schemas import OrderChange, SaleLine, StockLine
 
-_client: genai.Client | None = None
+REQUEST_TIMEOUT_SECONDS = 60.0
+
+_client: httpx.AsyncClient | None = None
 
 
-class GeminiExtractError(Exception):
+class ExtractError(Exception):
     def __init__(self, message: str = "No te entendí, intenta de nuevo o escríbelo") -> None:
         super().__init__(message)
         self.user_message = message
@@ -31,11 +42,19 @@ class StockExtraction(BaseModel):
     lines: list[StockLine]
 
 
-def _get_client() -> genai.Client:
+class OrderChangesExtraction(BaseModel):
+    changes: list[OrderChange]
+
+
+def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
         settings = get_settings()
-        _client = genai.Client(api_key=settings.gemini_api_key)
+        _client = httpx.AsyncClient(
+            base_url=settings.grok_base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {settings.grok_api_key}"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
     return _client
 
 
@@ -57,40 +76,63 @@ def _normalize_stock_lines(lines: list[StockLine]) -> list[StockLine]:
     return [line.model_copy(update={"sku": _blank_to_none(line.sku)}) for line in lines]
 
 
-async def _generate_json(contents: Any, response_schema: dict) -> dict:
+async def _chat_completion(content: Any, response_schema: dict, schema_name: str) -> str:
+    """Una llamada a Grok. Devuelve el texto de la respuesta (debería ser JSON)."""
     settings = get_settings()
-    response = await _get_client().aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_json_schema=response_schema,
-            temperature=0,
-        ),
+    response = await _get_client().post(
+        "/chat/completions",
+        json={
+            "model": settings.grok_model,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": content}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "schema": response_schema},
+            },
+        },
     )
-    text = (response.text or "").strip()
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"].get("content") or ""
+
+
+async def transcribe_audio(audio_bytes: bytes, mime_type: str) -> str:
+    """Voz → texto con el endpoint /stt. El audio no se guarda en ningún lado."""
+    extension = "ogg" if "ogg" in mime_type else mime_type.rsplit("/", 1)[-1]
+    response = await _get_client().post(
+        "/stt",
+        files={"file": (f"voice.{extension}", audio_bytes, mime_type)},
+        data={"language": "es"},
+    )
+    response.raise_for_status()
+    return str(response.json().get("text") or "").strip()
+
+
+async def _generate_json(content: Any, response_schema: dict, schema_name: str) -> dict:
+    text = (await _chat_completion(content, response_schema, schema_name)).strip()
     if not text:
-        raise GeminiExtractError()
+        raise ExtractError()
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise GeminiExtractError() from exc
+        raise ExtractError() from exc
     if not isinstance(data, dict):
-        raise GeminiExtractError()
+        raise ExtractError()
     return data
 
 
-async def _extract_with_retry(contents: Any, response_schema: dict, payload_model: type[BaseModel]) -> BaseModel:
+async def _extract_with_retry(
+    content: Any, response_schema: dict, schema_name: str, payload_model: type[BaseModel]
+) -> BaseModel:
     last_error: BaseException | None = None
     for _ in range(2):
         try:
-            data = await _generate_json(contents, response_schema)
+            data = await _generate_json(content, response_schema, schema_name)
             return payload_model.model_validate(data)
-        except (GeminiExtractError, ValidationError) as exc:
+        except (ExtractError, ValidationError) as exc:
             last_error = exc
         except Exception as exc:
             last_error = exc
-    raise GeminiExtractError() from last_error
+    raise ExtractError() from last_error
 
 
 async def extract_sales(
@@ -105,12 +147,15 @@ async def extract_sales(
     if audio_bytes and not audio_mime_type:
         raise ValueError("audio_mime_type is required when audio_bytes is set")
 
-    parts: list[types.Part] = []
     if audio_bytes:
-        parts.append(types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime_type))
-    parts.append(types.Part.from_text(text=sales_prompt(text, products)))
+        try:
+            text = await transcribe_audio(audio_bytes, audio_mime_type or "")
+        except Exception as exc:
+            raise ExtractError() from exc
+        if not text:
+            raise ExtractError()
 
-    payload = await _extract_with_retry(parts, SALES_RESPONSE_SCHEMA, SalesExtraction)
+    payload = await _extract_with_retry(sales_prompt(text, products), SALES_RESPONSE_SCHEMA, "sales", SalesExtraction)
     return _normalize_sale_lines(payload.lines)
 
 
@@ -125,9 +170,27 @@ async def extract_stock(
     if not image_mime_type:
         raise ValueError("image_mime_type is required")
 
-    parts = [
-        types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type),
-        types.Part.from_text(text=stock_prompt(products, note=note)),
+    data_url = f"data:{image_mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    content = [
+        {"type": "image_url", "image_url": {"url": data_url}},
+        {"type": "text", "text": stock_prompt(products, note=note)},
     ]
-    payload = await _extract_with_retry(parts, STOCK_RESPONSE_SCHEMA, StockExtraction)
+    payload = await _extract_with_retry(content, STOCK_RESPONSE_SCHEMA, "stock", StockExtraction)
     return _normalize_stock_lines(payload.lines)
+
+
+async def extract_order_changes(products: list[dict], message: str, current_order: str) -> list[OrderChange]:
+    """Cambios que el tendero pide al pedido sugerido ("quita el arroz", "ponle 2 cajas más de coca")."""
+    text = (message or "").strip()
+    if not text:
+        raise ValueError("message is required")
+    payload = await _extract_with_retry(
+        order_changes_prompt(text, products, current_order),
+        ORDER_CHANGES_RESPONSE_SCHEMA,
+        "order_changes",
+        OrderChangesExtraction,
+    )
+    return [
+        change.model_copy(update={"sku": _blank_to_none(change.sku), "product_text": change.product_text.strip()})
+        for change in payload.changes
+    ]

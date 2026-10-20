@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Identity,
@@ -62,9 +63,15 @@ class Store(Base):
     owner_name: Mapped[str] = mapped_column(String(160), nullable=False)
     link_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
+    # Días en que el proveedor pasa por la zona de la tienda (los define el distribuidor).
+    route_weekdays: Mapped[str] = mapped_column(String(32), nullable=False, default="0,2,4")
+    # Días en que el tendero recibe la mercancía (los escoge de route_weekdays en el bot).
     visit_weekdays: Mapped[str] = mapped_column(String(32), nullable=False, default="0,3")
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_days_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Entrega para la que ya se mandó el recordatorio de pedido (evita repetirlo).
+    last_reminder_for: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="stores")
     sales: Mapped[list["Sale"]] = relationship(back_populates="store")
@@ -76,7 +83,12 @@ class Store(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("distributor_id", "sku", name="uq_products_distributor_sku"),)
+    __table_args__ = (
+        UniqueConstraint("distributor_id", "sku", name="uq_products_distributor_sku"),
+        CheckConstraint(
+            "available_units IS NULL OR available_units >= 0", name="ck_products_available_units_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     distributor_id: Mapped[int] = mapped_column(
@@ -89,6 +101,8 @@ class Product(Base):
     units_per_case: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Unidades que el distribuidor tiene para vender. None = no lleva la cuenta (sin límite).
+    available_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="products")
 
@@ -176,6 +190,7 @@ class SuggestedOrder(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     store: Mapped[Store] = relationship(back_populates="suggested_orders")
     items: Mapped[list["SuggestedOrderItem"]] = relationship(

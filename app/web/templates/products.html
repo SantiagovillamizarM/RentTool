@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Productos{% endblock %}
+{# Aquí se edita: no se recarga sola, avisa que hay datos nuevos. #}
+{% block live %}notify{% endblock %}
+{% block content %}
+<header class="page-head">
+  <span class="eyebrow">Catálogo</span>
+  <h1>Lo que tienes <span class="accent">para vender</span></h1>
+  <p>El bot solo sugiere y deja pedir lo que tengas disponible. Cuando cambias un precio o agregas un producto, tus tiendas reciben un aviso por Telegram. Haz clic en un producto para ver qué días se vende más.</p>
+</header>
+
+{% if message %}<p class="notice">{{ message }}</p>{% endif %}
+{% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Tu catálogo</h2>
+      <span class="muted small">{{ products|selectattr('active')|list|length }} activos de {{ products|length }}</span>
+    </div>
+    <button type="button" class="primary" data-open-modal="add-modal">
+      Agregar producto <span class="btn-arrow">{{ icon.svg('<path d="M12 5v14"/><path d="M5 12h14"/>') }}</span>
+    </button>
+  </div>
+  {% if products %}
+  {# Un solo formulario para todo el catálogo: se edita lo que sea y se guarda con un botón. #}
+  <form id="catalog-form" method="post" action="/panel/productos/guardar">
+  <div class="table-wrap">
+    <table class="catalog">
+      <thead>
+        <tr>
+          <th>Producto</th><th class="num">Caja</th><th>Precio por unidad</th>
+          <th>Disponible (unidades)</th><th>Activo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+        {% set price_key = 'price-' ~ p.id %}
+        {% set available_key = 'available-' ~ p.id %}
+        {% set initial_available = '' if p.available_units is none else p.available_units %}
+        {% set is_active = (submitted.get('active-' ~ p.id) == 'on') if submitted else p.active %}
+        <tr class="product-row {{ '' if p.active else 'inactive' }} {{ 'row-error' if p.id in error_ids }}" data-product="{{ p.id }}" data-name="{{ p.name }}" tabindex="0" aria-expanded="false" aria-label="Ver ventas de {{ p.name }}">
+          <td>
+            <input type="hidden" name="ids" value="{{ p.id }}">
+            <div class="product-cell">
+              <span class="chevron">{{ icon.svg('<path d="m9 6 6 6-6 6"/>') }}</span>
+              <div>
+                <strong>{{ p.name }}</strong>
+                {% if p.active and p.available_units is not none and p.available_units < p.units_per_case %}<span class="badge badge-risk">Agotado</span>{% endif %}
+                <span class="muted small sku">{{ p.sku }} · {{ p.presentation }}</span>
+              </div>
+            </div>
+          </td>
+          <td class="num muted">{{ p.units_per_case }}</td>
+          <td><input name="{{ price_key }}" value="{{ submitted.get(price_key, p.unit_price|int) }}" data-initial="{{ p.unit_price|int }}" inputmode="numeric" class="cell-input" aria-label="Precio de {{ p.name }}"></td>
+          <td><input name="{{ available_key }}" value="{{ submitted.get(available_key, initial_available) }}" data-initial="{{ initial_available }}" inputmode="numeric" class="cell-input" placeholder="Sin límite" aria-label="Disponible de {{ p.name }}"></td>
+          <td><label class="switch"><input type="checkbox" name="active-{{ p.id }}" {{ 'checked' if is_active }} data-initial="{{ 'on' if p.active else '' }}" aria-label="{{ p.name }} activo"><span></span></label></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </form>
+  <p class="muted small" style="margin: 1rem 0 0">Edita todos los productos que quieras y guárdalos juntos con el botón de abajo. "Agotado" = no alcanza para una caja completa. Desactiva lo que ya no vendes: no se borra, para no perder el historial de ventas.</p>
+  {% else %}
+  <p class="empty">Aún no tienes productos. Agrega el primero con el botón de arriba.</p>
+  {% endif %}
+</section>
+
+{# Panel de ventas: uno solo, se mueve debajo del producto que se abre. #}
+<template id="sales-panel-template">
+  <tr class="sales-row">
+    <td colspan="5">
+      <div class="sales-panel">
+        <div class="sales-head">
+          <div>
+            <h3>¿Qué días se vende más?</h3>
+            <span class="muted small" data-subtitle>Unidades vendidas por día de la semana</span>
+          </div>
+          <button type="button" class="icon-btn" data-fullscreen aria-label="Ver en pantalla completa" title="Pantalla completa">
+            {{ icon.svg('<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>') }}
+          </button>
+        </div>
+        <div class="sales-chart"><canvas aria-label="Ventas por día de la semana" role="img"></canvas></div>
+        <p class="sales-message muted" hidden></p>
+        <div class="sales-foot">
+          <label class="select-label">Tienda
+            <select data-store-select><option value="all">Todas las tiendas</option></select>
+          </label>
+          <div class="chips" data-summary></div>
+        </div>
+      </div>
+    </td>
+  </tr>
+</template>
+
+{# Barra para guardar: aparece cuando hay cambios sin guardar. #}
+<div class="save-bar" id="save-bar" role="region" aria-label="Cambios sin guardar" hidden>
+  <span class="save-count"><span class="save-dot"></span><strong id="save-count">0</strong> <span id="save-word">cambios sin guardar</span></span>
+  <button type="button" class="btn btn-ghost" id="save-discard">Descartar</button>
+  <button type="submit" form="catalog-form" class="primary" id="save-submit">Guardar cambios <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+</div>
+
+{# Ventana: agregar producto #}
+<div class="modal-overlay" id="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title" {{ '' if create_error else 'hidden' }}>
+  <div class="modal-card">
+    <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Cerrar">{{ icon.svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>') }}</button>
+    <span class="eyebrow">Nuevo producto</span>
+    <h2 id="add-title">Agregar al catálogo</h2>
+    <p class="muted">Tus tiendas reciben un aviso por Telegram apenas lo guardes.</p>
+    {% if create_error %}<p class="alert">{{ create_error }}</p>{% endif %}
+    <form method="post" action="/panel/productos/nuevo" class="form-grid">
+      <label>Código (SKU)<input name="sku" value="{{ form.sku or '' }}" maxlength="32" placeholder="ASE-JABO-3" required></label>
+      <label>Nombre<input name="name" value="{{ form.name or '' }}" maxlength="160" placeholder="Jabón Rey x 3" required></label>
+      <label>Presentación<input name="presentation" value="{{ form.presentation or '' }}" maxlength="80" placeholder="x 3" required></label>
+      <label>Unidades por caja<input name="units_per_case" value="{{ form.units_per_case or '' }}" inputmode="numeric" placeholder="12" required></label>
+      <label>Precio por unidad<input name="unit_price" value="{{ form.unit_price or '' }}" inputmode="numeric" placeholder="5500" required></label>
+      <label>Unidades disponibles<input name="available_units" value="{{ form.available_units or '' }}" inputmode="numeric" placeholder="Vacío = sin límite"></label>
+      <label class="wide">Otros nombres que usan los tenderos (separados por coma)<input name="aliases" value="{{ form.aliases or '' }}" placeholder="jabon rey, jabón de ropa"></label>
+      <div class="wide actions">
+        <button type="button" class="btn btn-ghost" data-close-modal>Cancelar</button>
+        <button type="submit" class="primary">Agregar producto <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Ventana: gráfico en pantalla completa #}
+<div class="modal-overlay" id="chart-modal" role="dialog" aria-modal="true" aria-labelledby="chart-title" hidden>
+  <div class="modal-card modal-wide">
+    <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Cerrar">{{ icon.svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>') }}</button>
+    <span class="eyebrow">¿Qué días se vende más?</span>
+    <h2 id="chart-title"></h2>
+    <p class="muted small" data-subtitle></p>
+    <div class="sales-chart sales-chart-big"><canvas aria-label="Ventas por día de la semana" role="img"></canvas></div>
+    <div class="sales-foot">
+      <label class="select-label">Tienda
+        <select data-store-select><option value="all">Todas las tiendas</option></select>
+      </label>
+      <div class="chips" data-summary></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+  // ---------------------------------------------------------------- Ventanas
+  var lastFocus = null;
+
+  function openModal(modal) {
+    lastFocus = document.activeElement;
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+    var first = modal.querySelector("input, select, button:not(.modal-close)");
+    if (first) { first.focus(); }
+  }
+
+  function closeModal(modal) {
+    modal.hidden = true;
+    if (!document.querySelector(".modal-overlay:not([hidden])")) { document.body.classList.remove("modal-open"); }
+    if (lastFocus) { lastFocus.focus(); }
+  }
+
+  document.querySelectorAll("[data-open-modal]").forEach(function (button) {
+    button.addEventListener("click", function () { openModal(document.getElementById(button.dataset.openModal)); });
+  });
+  document.querySelectorAll(".modal-overlay").forEach(function (modal) {
+    modal.addEventListener("click", function (event) {
+      if (event.target === modal || event.target.closest("[data-close-modal]")) { closeModal(modal); }
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") { return; }
+    var open = document.querySelector(".modal-overlay:not([hidden])");
+    if (open) { closeModal(open); }
+  });
+  var addModal = document.getElementById("add-modal");
+  if (!addModal.hidden) { openModal(addModal); }
+
+  // ---------------------------------------------------------------- Guardar todo de una vez
+  var catalogForm = document.getElementById("catalog-form");
+  var saveBar = document.getElementById("save-bar");
+  if (catalogForm) {
+    var fields = Array.prototype.slice.call(catalogForm.querySelectorAll("[data-initial]"));
+    var submitting = false;
+
+    function current(field) { return field.type === "checkbox" ? (field.checked ? "on" : "") : field.value.trim(); }
+
+    function refresh() {
+      var rows = new Set();
+      fields.forEach(function (field) {
+        var changed = current(field) !== field.dataset.initial;
+        field.classList.toggle("changed", changed);
+        if (changed) { rows.add(field.closest("tr")); }
+      });
+      document.querySelectorAll(".product-row").forEach(function (row) { row.classList.toggle("dirty", rows.has(row)); });
+      document.getElementById("save-count").textContent = rows.size;
+      document.getElementById("save-word").textContent = rows.size === 1 ? "producto con cambios" : "productos con cambios";
+      saveBar.hidden = rows.size === 0;
+      document.body.classList.toggle("has-save-bar", rows.size > 0);
+      return rows.size;
+    }
+
+    fields.forEach(function (field) {
+      field.addEventListener("input", refresh);
+      field.addEventListener("change", refresh);
+    });
+    document.getElementById("save-discard").addEventListener("click", function () {
+      fields.forEach(function (field) {
+        if (field.type === "checkbox") { field.checked = field.dataset.initial === "on"; } else { field.value = field.dataset.initial; }
+      });
+      refresh();
+    });
+    catalogForm.addEventListener("submit", function () {
+      submitting = true;
+      document.getElementById("save-submit").disabled = true;
+    });
+    // Enter en un campo guarda todo (no solo esa fila).
+    catalogForm.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && event.target.matches("input.cell-input")) { event.preventDefault(); catalogForm.requestSubmit(); }
+    });
+    window.addEventListener("beforeunload", function (event) {
+      if (!submitting && refresh() > 0) { event.preventDefault(); event.returnValue = ""; }
+    });
+    refresh();
+  }
+
+  // ---------------------------------------------------------------- Gráfico de ventas
+  if (!window.Chart) { return; }
+  Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+  Chart.defaults.color = "#8d99b0";
+
+  var STORE_COLORS = ["#f6be45", "#5b8def", "#5fd39a", "#c58cf0", "#ff9f7a", "#7fd1e6"];
+  var cache = {};
+  var current = null;      // { id, data, store }
+  var openRow = null;
+  var panelRow = null;
+  var inlineChart = null;
+  var bigChart = null;
+  var chartModal = document.getElementById("chart-modal");
+
+  function selection(data, store) {
+    var stores = store === "all" ? data.stores : data.stores.filter(function (s) { return String(s.id) === store; });
+    var totals = [0, 0, 0, 0, 0, 0, 0];
+    stores.forEach(function (s) { s.values.forEach(function (v, i) { totals[i] += v; }); });
+    return { stores: stores, totals: totals };
+  }
+
+  function datasets(data, store) {
+    var picked = selection(data, store);
+    if (store !== "all") {
+      var max = Math.max.apply(null, picked.totals);
+      return [{
+        label: picked.stores[0] ? picked.stores[0].name : "",
+        data: picked.totals,
+        backgroundColor: picked.totals.map(function (v) { return v === max && max > 0 ? "#f6be45" : "rgba(246, 190, 69, 0.28)"; }),
+        hoverBackgroundColor: "#ffd06a",
+        borderRadius: 8,
+        borderSkipped: false,
+        maxBarThickness: 56
+      }];
+    }
+    return data.stores.map(function (s, i) {
+      return {
+        label: s.name,
+        data: s.values,
+        backgroundColor: STORE_COLORS[i % STORE_COLORS.length],
+        borderRadius: 6,
+        borderSkipped: false,
+        maxBarThickness: 56
+      };
+    });
+  }
+
+  function buildChart(canvas, data, store, big) {
+    return new Chart(canvas, {
+      type: "bar",
+      data: { labels: data.labels, datasets: datasets(data, store) },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: store === "all",
+            position: "bottom",
+            labels: { usePointStyle: true, pointStyle: "rectRounded", boxWidth: 10, padding: big ? 20 : 14 }
+          },
+          tooltip: {
+            backgroundColor: "rgba(4, 28, 75, 0.95)",
+            borderColor: "rgba(246, 190, 69, 0.4)",
+            borderWidth: 1,
+            padding: 10,
+            callbacks: {
+              title: function (items) { return data.full_labels[items[0].dataIndex]; },
+              label: function (item) { return " " + item.dataset.label + ": " + item.parsed.y + " u."; }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: big ? 14 : 12 } } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grid: { color: "rgba(255, 255, 255, 0.06)" }, border: { display: false } }
+        }
+      }
+    });
+  }
+
+  function summaryHtml(data, store) {
+    var picked = selection(data, store);
+    var total = picked.totals.reduce(function (a, b) { return a + b; }, 0);
+    if (!total) { return '<span class="chip">Sin ventas en las últimas ' + data.weeks + ' semanas</span>'; }
+    var best = picked.totals.indexOf(Math.max.apply(null, picked.totals));
+    var html = '<span class="chip">Día que más vende <strong>' + data.full_labels[best] + '</strong></span>';
+    if (store === "all") {
+      var top = data.stores.slice().sort(function (a, b) { return b.total - a.total; })[0];
+      html += '<span class="chip">Tienda que más vende <strong>' + escapeHtml(top.name) + '</strong></span>';
+    }
+    html += '<span class="chip">Total <strong>' + total + ' u.</strong> en ' + data.weeks + ' semanas</span>';
+    return html;
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function fillSelect(select, data, store) {
+    select.innerHTML = '<option value="all">Todas las tiendas</option>' + data.stores.map(function (s) {
+      return '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>';
+    }).join("");
+    select.value = store;
+  }
+
+  function render(container, chart, big) {
+    var data = current.data;
+    var store = current.store;
+    container.querySelector("[data-summary]").innerHTML = summaryHtml(data, store);
+    container.querySelector("[data-subtitle]").textContent =
+      "Unidades vendidas por día de la semana · últimas " + data.weeks + " semanas · " +
+      (store === "all" ? "todas las tiendas" : selection(data, store).stores[0].name);
+    fillSelect(container.querySelector("[data-store-select]"), data, store);
+    if (chart) { chart.destroy(); }
+    return buildChart(container.querySelector("canvas"), data, store, big);
+  }
+
+  function setStore(store) {
+    current.store = store;
+    inlineChart = render(panelRow, inlineChart, false);
+    if (!chartModal.hidden) { bigChart = render(chartModal, bigChart, true); }
+  }
+
+  function closePanel() {
+    if (inlineChart) { inlineChart.destroy(); inlineChart = null; }
+    if (panelRow) { panelRow.remove(); panelRow = null; }
+    if (openRow) { openRow.classList.remove("open"); openRow.setAttribute("aria-expanded", "false"); openRow = null; }
+  }
+
+  function openPanel(row) {
+    var id = row.dataset.product;
+    if (openRow === row) { closePanel(); return; }
+    closePanel();
+    openRow = row;
+    row.classList.add("open");
+    row.setAttribute("aria-expanded", "true");
+    panelRow = document.getElementById("sales-panel-template").content.firstElementChild.cloneNode(true);
+    row.after(panelRow);
+    var message = panelRow.querySelector(".sales-message");
+    panelRow.querySelector("[data-store-select]").addEventListener("change", function (e) { setStore(e.target.value); });
+    panelRow.querySelector("[data-fullscreen]").addEventListener("click", openFullscreen);
+
+    var load = cache[id] ? Promise.resolve(cache[id]) : fetch("/panel/productos/" + id + "/ventas", { headers: { Accept: "application/json" } })
+      .then(function (r) { if (!r.ok || !(r.headers.get("content-type") || "").includes("json")) { throw new Error(); } return r.json(); });
+    message.hidden = false;
+    message.textContent = "Cargando ventas…";
+    load.then(function (data) {
+      cache[id] = data;
+      if (openRow !== row) { return; }
+      message.hidden = true;
+      current = { id: id, data: data, store: "all" };
+      inlineChart = render(panelRow, inlineChart, false);
+    }).catch(function () {
+      message.textContent = "No se pudieron cargar las ventas. Recarga la página e intenta de nuevo.";
+    });
+  }
+
+  function openFullscreen() {
+    if (!current) { return; }
+    chartModal.querySelector("#chart-title").textContent = current.data.product;
+    openModal(chartModal);
+    bigChart = render(chartModal, bigChart, true);
+  }
+
+  chartModal.querySelector("[data-store-select]").addEventListener("change", function (e) { setStore(e.target.value); });
+
+  document.querySelectorAll(".product-row").forEach(function (row) {
+    row.addEventListener("click", function (event) {
+      // Los campos de precio, existencias, el interruptor y Guardar no abren el gráfico.
+      if (event.target.closest("input, button, label, a, select")) { return; }
+      openPanel(row);
+    });
+    row.addEventListener("keydown", function (event) {
+      if ((event.key === "Enter" || event.key === " ") && event.target === row) { event.preventDefault(); openPanel(row); }
+    });
+  });
+})();
+</script>
+{% endblock %}

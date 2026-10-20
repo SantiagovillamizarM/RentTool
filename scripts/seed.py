@@ -1,6 +1,10 @@
+"""Datos base para arrancar: distribuidor, usuario del panel, catálogo y tiendas.
+
+No inventa ventas, conteos ni pedidos: todo eso llega de verdad desde Telegram.
+Volver a correrlo borra los datos de este distribuidor (también las ventas reales).
+"""
+
 import asyncio
-import random
-from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import bcrypt
@@ -18,10 +22,10 @@ from app.models import (
     Store,
 )
 
-SEED = 1581
 DISTRIBUTOR_NAME = "Distribuidora El Barrio"
 DEMO_EMAIL = "demo@demo.co"
 
+# (sku, nombre, otros nombres, presentación, unidades por caja, precio por unidad)
 PRODUCTS = [
     ("GAS-COCA-1L", "Coca-Cola 1 litro", "coca litro,coca cola litro,coca 1l,gaseosa coca litro", "1 L", 12, 4500),
     ("GAS-COCA-400", "Coca-Cola 400 ml", "coca personal,coca 400,cocacola pequeña", "400 ml", 24, 2500),
@@ -55,35 +59,18 @@ PRODUCTS = [
     ("ATU-VANC-170", "Atún Van Camps 170 g", "atun,atún,van camps,lata de atun", "170 g", 24, 6900),
 ]
 
+# (nombre, dueño, código de vinculación, días de ruta del proveedor, días de entrega iniciales,
+#  días de anticipación para pedir). Los días de entrega iniciales se usan hasta que el tendero
+#  escoja los suyos en el bot.
 STORES = [
-    ("Tienda Doña Marta", "Marta Gómez", "MARTA01", "0,3", 1),
-    ("Mini Market El Parque", "Carlos Ruiz", "PARQUE02", "1,4", 1),
-    ("La Esquina de Luz", "Luz Helena Díaz", "LUZ03", "0,3", 2),
+    ("Tienda Doña Marta", "Marta Gómez", "MARTA01", "0,2,4", "0,4", 1),
+    ("Mini Market El Parque", "Carlos Ruiz", "PARQUE02", "1,3,5", "1,5", 1),
+    ("La Esquina de Luz", "Luz Helena Díaz", "LUZ03", "0,2,4", "0,2", 2),
 ]
-
-GROWING_SKU = "GAS-COCA-1L"
-STAGNANT_SKU = "CAF-AGUI-125"
-WEEKEND_SKU = "PAN-TAJA-UND"
 
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-
-def daily_quantity(sku: str, day: datetime, rng: random.Random) -> int:
-    weekday = day.weekday()
-    if sku == STAGNANT_SKU:
-        return 0
-    if sku == WEEKEND_SKU:
-        if weekday in {4, 5, 6}:
-            return rng.randint(8, 14)
-        return rng.randint(0, 1)
-    if sku == GROWING_SKU:
-        base = 2 + int(day.day / 4)
-        return max(1, base + rng.randint(-1, 2))
-    if weekday in {4, 5, 6}:
-        return rng.randint(1, 5)
-    return rng.randint(0, 3)
 
 
 async def seed(session: AsyncSession) -> None:
@@ -91,9 +78,7 @@ async def seed(session: AsyncSession) -> None:
     existing = await session.scalar(select(Distributor).where(Distributor.name == DISTRIBUTOR_NAME))
     if existing is not None:
         store_ids = list(
-            (
-                await session.scalars(select(Store.id).where(Store.distributor_id == existing.id))
-            ).all()
+            (await session.scalars(select(Store.id).where(Store.distributor_id == existing.id))).all()
         )
         if store_ids:
             await session.execute(delete(Sale).where(Sale.store_id.in_(store_ids)))
@@ -102,9 +87,7 @@ async def seed(session: AsyncSession) -> None:
         # que apuntan a productos con RESTRICT.
         await session.execute(delete(Store).where(Store.distributor_id == existing.id))
         await session.execute(delete(Product).where(Product.distributor_id == existing.id))
-        await session.execute(
-            delete(DistributorUser).where(DistributorUser.distributor_id == existing.id)
-        )
+        await session.execute(delete(DistributorUser).where(DistributorUser.distributor_id == existing.id))
         await session.delete(existing)
         await session.flush()
 
@@ -120,86 +103,34 @@ async def seed(session: AsyncSession) -> None:
         )
     )
 
-    products: dict[str, Product] = {}
     for sku, name, aliases, presentation, units_per_case, unit_price in PRODUCTS:
-        product = Product(
-            distributor_id=distributor.id,
-            sku=sku,
-            name=name,
-            aliases=aliases,
-            presentation=presentation,
-            units_per_case=units_per_case,
-            unit_price=Decimal(unit_price),
-            active=True,
-        )
-        session.add(product)
-        products[sku] = product
-    await session.flush()
-
-    stores: list[Store] = []
-    for name, owner_name, link_code, visit_weekdays, lead_time_days in STORES:
-        store = Store(
-            distributor_id=distributor.id,
-            name=name,
-            owner_name=owner_name,
-            link_code=link_code,
-            visit_weekdays=visit_weekdays,
-            lead_time_days=lead_time_days,
-        )
-        session.add(store)
-        stores.append(store)
-    await session.flush()
-
-    today = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
-    start = today - timedelta(days=59)
-    rng = random.Random(SEED)
-
-    count_rng = random.Random(SEED + 1)
-    count_cutoff = today - timedelta(days=1)
-
-    for store in stores:
-        recent_units: dict[str, int] = {sku: 0 for sku in products}
-        for offset in range(60):
-            sold_at = start + timedelta(days=offset)
-            for sku, product in products.items():
-                quantity = daily_quantity(sku, sold_at, rng)
-                if quantity <= 0:
-                    continue
-                if sold_at > count_cutoff - timedelta(days=28):
-                    recent_units[sku] += quantity
-                session.add(
-                    Sale(
-                        store_id=store.id,
-                        product_id=product.id,
-                        quantity=quantity,
-                        unit_price=product.unit_price,
-                        sold_at=sold_at,
-                        source="manual",
-                    )
-                )
-        # Conteo de ayer en la noche: así el stock refleja solo las ventas de hoy.
-        counted_at = count_cutoff.replace(hour=21)
-        for sku, product in products.items():
-            daily = recent_units[sku] / 28
-            if sku == STAGNANT_SKU:
-                quantity = 18
-            elif sku == WEEKEND_SKU:
-                quantity = 2
-            elif sku == GROWING_SKU:
-                quantity = max(1, round(daily * 1.5))
-            else:
-                # Días de cobertura variados: unos casi agotados, otros sobrados.
-                cover_days = count_rng.choice([1, 2, 3, 5, 8, 12, 20, 60])
-                quantity = max(0, round(daily * cover_days))
-            session.add(
-                StockCount(
-                    store_id=store.id,
-                    product_id=product.id,
-                    quantity=quantity,
-                    counted_at=counted_at,
-                    source="manual",
-                )
+        session.add(
+            Product(
+                distributor_id=distributor.id,
+                sku=sku,
+                name=name,
+                aliases=aliases,
+                presentation=presentation,
+                units_per_case=units_per_case,
+                unit_price=Decimal(unit_price),
+                active=True,
+                # Sin cantidad registrada (sin límite) hasta que el distribuidor la ponga en el panel.
+                available_units=None,
             )
+        )
+
+    for name, owner_name, link_code, route_weekdays, visit_weekdays, lead_time_days in STORES:
+        session.add(
+            Store(
+                distributor_id=distributor.id,
+                name=name,
+                owner_name=owner_name,
+                link_code=link_code,
+                route_weekdays=route_weekdays,
+                visit_weekdays=visit_weekdays,
+                lead_time_days=lead_time_days,
+            )
+        )
 
     await session.commit()
 
@@ -208,7 +139,7 @@ async def main() -> None:
     async with SessionLocal() as session:
         await seed(session)
     await engine.dispose()
-    print("Seed listo: demo@demo.co / 3 tiendas / 30 productos / 60 días")
+    print(f"Listo: {DEMO_EMAIL} / {len(STORES)} tiendas sin vincular / {len(PRODUCTS)} productos / sin ventas")
 
 
 if __name__ == "__main__":

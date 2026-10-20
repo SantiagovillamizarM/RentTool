@@ -7,6 +7,7 @@ CANCEL_SALES = "sales:cancel"
 CONFIRM_STOCK = "stock:confirm"
 CANCEL_STOCK = "stock:cancel"
 SEND_ORDER = "order:send"
+CANCEL_ORDER = "order:cancel"
 
 
 def consent_keyboard() -> InlineKeyboardMarkup:
@@ -42,7 +43,40 @@ def confirm_stock_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def send_order_keyboard() -> InlineKeyboardMarkup:
+def order_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Enviar al distribuidor", callback_data=SEND_ORDER)]]
+        [
+            [
+                InlineKeyboardButton("✅ Enviar al distribuidor", callback_data=SEND_ORDER),
+                InlineKeyboardButton("❌ Cancelar", callback_data=CANCEL_ORDER),
+            ]
+        ]
     )
+
+
+# Días de entrega: la selección viaja en el callback ("days:<días marcados>:<acción>"),
+# así no hay estado a medio guardar. Acción = un día (0-6) para marcar/desmarcar u "ok".
+DAYS_PREFIX = "days"
+DAYS_PATTERN = r"^days:[0-6]*:([0-6]|ok)$"
+WEEKDAY_NAMES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+
+def days_keyboard(route_days: list[int], selected: list[int]) -> InlineKeyboardMarkup:
+    marked = "".join(str(d) for d in sorted(selected))
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"{'✅' if day in selected else '⬜'} {WEEKDAY_NAMES[day]}",
+                callback_data=f"{DAYS_PREFIX}:{marked}:{day}",
+            )
+        ]
+        for day in route_days
+    ]
+    rows.append([InlineKeyboardButton("Listo", callback_data=f"{DAYS_PREFIX}:{marked}:ok")])
+    return InlineKeyboardMarkup(rows)
+
+
+def parse_days_callback(data: str) -> tuple[list[int], str]:
+    """'days:04:2' -> ([0, 4], '2')"""
+    _prefix, marked, action = data.split(":")
+    return sorted({int(d) for d in marked}), action

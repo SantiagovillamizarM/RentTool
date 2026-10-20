@@ -5,8 +5,9 @@ Funciones puras: reciben StoreAnalysis ya calculados y no tocan la base de datos
 
 import math
 from dataclasses import dataclass
+from datetime import datetime
 
-from app.inventory.engine import ProductAnalysis, StoreAnalysis
+from app.inventory.engine import ProductAnalysis, StoreAnalysis, local_date
 
 # Evita que errores de punto flotante (14.0000000001) suban una unidad al redondear.
 _FLOAT_PRECISION = 6
@@ -49,6 +50,8 @@ def aggregate_demand(analyses: list[StoreAnalysis]) -> list[DemandRow]:
     for product_id, projected in totals.items():
         product = info[product_id]
         units = _ceil(projected)
+        if units <= 0:
+            continue  # sin ventas en ninguna tienda: no hay nada que proyectar
         per_case = max(1, product.units_per_case)
         rows.append(
             DemandRow(
@@ -87,3 +90,27 @@ def product_status(product: ProductAnalysis) -> str:
     if product.stagnant:
         return "Estancado"
     return "OK"
+
+
+WEEKDAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+WEEKDAY_FULL = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def weekday_sales(rows: list[tuple[int, datetime, int]], stores: list[tuple[int, str]]) -> dict:
+    """Unidades vendidas por día de la semana (hora Colombia), por tienda.
+
+    `rows` son (store_id, sold_at, quantity) de un producto. Cada tienda trae sus 7 valores
+    (lunes a domingo) y su total; las tiendas sin ventas también aparecen, en cero.
+    """
+    values = {store_id: [0] * 7 for store_id, _name in stores}
+    for store_id, sold_at, quantity in rows:
+        if store_id in values:
+            values[store_id][local_date(sold_at).weekday()] += quantity
+    return {
+        "labels": WEEKDAY_SHORT,
+        "full_labels": WEEKDAY_FULL,
+        "stores": [
+            {"id": store_id, "name": name, "values": values[store_id], "total": sum(values[store_id])}
+            for store_id, name in stores
+        ],
+    }

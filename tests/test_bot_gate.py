@@ -122,3 +122,122 @@ async def test_reject_after_accepting_keeps_link(monkeypatch):
     await handlers.handle_reject_consent(callback_update(), None)
     assert store.telegram_chat_id == 555
     assert replies == [texts.CONSENT_ALREADY]
+
+
+# --- Días de entrega ---------------------------------------------------------
+
+
+class DaysQuery:
+    def __init__(self, data):
+        self.data = data
+        self.alerts: list[str] = []
+        self.markup = None
+        self.removed = False
+
+    async def answer(self, text=None, show_alert=False):
+        if text:
+            self.alerts.append(text)
+
+    async def edit_message_reply_markup(self, reply_markup=None):
+        if reply_markup is None:
+            self.removed = True
+        self.markup = reply_markup
+
+
+def days_update(data):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(callback_query=DaysQuery(data), effective_chat=SimpleNamespace(id=555))
+
+
+def days_store(**overrides):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    values = dict(
+        consent_at=datetime.now(UTC),
+        delivery_days_set_at=None,
+        route_weekdays="0,2,4",
+        visit_weekdays="0,3",
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_days_texts():
+    assert texts.join_days([4, 0, 2]) == "lunes, miércoles y viernes"
+    assert texts.join_days([5]) == "sábado"
+    assert texts.ask_days([0, 2, 4]).startswith("📅 Tu proveedor pasa por tu barrio los lunes, miércoles y viernes.")
+
+
+@pytest.mark.asyncio
+async def test_days_toggle_marks_and_unmarks_without_saving(monkeypatch):
+    from app.bot import keyboards
+
+    store = days_store()
+    patch_store(monkeypatch, store)
+    update = days_update("days:0:4")
+    await handlers.handle_days(update, None)
+    buttons = [row[0] for row in update.callback_query.markup.inline_keyboard]
+    assert [b.text for b in buttons] == ["✅ Lunes", "⬜ Miércoles", "✅ Viernes", "Listo"]
+    assert buttons[-1].callback_data == "days:04:ok"
+    assert keyboards.parse_days_callback("days:04:0") == ([0, 4], "0")
+    assert store.delivery_days_set_at is None
+
+
+@pytest.mark.asyncio
+async def test_days_ignores_days_outside_route(monkeypatch):
+    store = days_store()
+    patch_store(monkeypatch, store)
+    update = days_update("days:16:ok")
+    await handlers.handle_days(update, None)
+    assert update.callback_query.alerts == [texts.DAYS_EMPTY]
+    assert store.delivery_days_set_at is None
+
+
+@pytest.mark.asyncio
+async def test_days_ok_saves_selection(monkeypatch):
+    store = days_store()
+    replies = patch_store(monkeypatch, store)
+    update = days_update("days:04:ok")
+    await handlers.handle_days(update, None)
+    assert store.visit_weekdays == "0,4"
+    assert store.delivery_days_set_at is not None
+    assert update.callback_query.removed
+    assert replies == [texts.days_saved([0, 4])]
+
+
+@pytest.mark.asyncio
+async def test_days_cannot_be_changed_with_old_buttons(monkeypatch):
+    from datetime import UTC, datetime
+
+    store = days_store(delivery_days_set_at=datetime.now(UTC), visit_weekdays="0,4")
+    replies = patch_store(monkeypatch, store)
+    await handlers.handle_days(days_update("days:2:ok"), None)
+    assert store.visit_weekdays == "0,4"
+    assert replies == []
+
+
+@pytest.mark.asyncio
+async def test_store_without_days_is_asked_before_using_bot(monkeypatch):
+    store = days_store()
+    replies = patch_store(monkeypatch, store)
+    assert await handlers.require_ready_store(callback_update(), None) is None
+    assert replies == [texts.NEED_DAYS, texts.ask_days([0, 2, 4])]
+
+
+@pytest.mark.asyncio
+async def test_start_greets_before_asking_days(monkeypatch):
+    store = days_store(name="Tienda Doña Marta")
+    replies = patch_store(monkeypatch, store)
+    await handlers.handle_start(callback_update(), None)
+    assert replies == [texts.start_needs_days("Tienda Doña Marta"), texts.ask_days([0, 2, 4])]
+    assert replies[0].startswith(texts.INTRO)
+
+
+@pytest.mark.asyncio
+async def test_start_greets_before_asking_consent(monkeypatch):
+    store = days_store(consent_at=None)
+    replies = patch_store(monkeypatch, store)
+    await handlers.handle_start(callback_update(), None)
+    assert replies == [texts.INTRO, texts.CONSENT_NOTICE]

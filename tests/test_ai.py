@@ -1,11 +1,10 @@
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import ValidationError
 
-from app.ai.gemini_client import GeminiExtractError, extract_sales, extract_stock
+from app.ai.grok_client import ExtractError, extract_sales, extract_stock
 from app.ai.matching import MATCH_THRESHOLD, match_sale_lines, match_stock_lines, resolve_sku
 from app.ai.prompts import sales_prompt, stock_prompt
 from app.schemas import SaleLine, StockLine
@@ -24,14 +23,12 @@ CATALOG = [
 ]
 
 
-def fake_response(payload: dict | str) -> SimpleNamespace:
-    text = payload if isinstance(payload, str) else json.dumps(payload)
-    return SimpleNamespace(text=text)
+def fake_response(payload: dict | str) -> str:
+    return payload if isinstance(payload, str) else json.dumps(payload)
 
 
 def patch_generate(side_effect):
-    client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=AsyncMock(side_effect=side_effect))))
-    return patch("app.ai.gemini_client._get_client", return_value=client)
+    return patch("app.ai.grok_client._chat_completion", new=AsyncMock(side_effect=side_effect))
 
 
 # --- Matching ----------------------------------------------------------------
@@ -78,7 +75,7 @@ def test_match_stock_lines_only_uses_sku():
 # --- Prompts -----------------------------------------------------------------
 
 
-def test_prompts_do_not_ask_gemini_to_calculate():
+def test_prompts_do_not_ask_ai_to_calculate():
     sales = sales_prompt("vendí 2 coca litro", CATALOG)
     stock = stock_prompt(CATALOG)
     assert "No calcules" in sales
@@ -100,11 +97,11 @@ def test_stock_line_rejects_confidence_out_of_range():
         StockLine(sku=None, quantity=1, confidence=1.5)
 
 
-# --- Gemini simulado ---------------------------------------------------------
+# --- Grok simulado -----------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_extract_sales_validates_json_from_gemini():
+async def test_extract_sales_validates_json_from_grok():
     payload = {
         "lines": [
             {"sku": "GAS-COCA-1L", "product_text": "coca cola litro", "quantity": 2},
@@ -113,7 +110,7 @@ async def test_extract_sales_validates_json_from_gemini():
     }
     with patch_generate([fake_response(payload)]) as mocked:
         lines = await extract_sales(CATALOG, transcript="vendí 2 coca cola litro y un pan")
-    mocked.return_value.aio.models.generate_content.assert_awaited_once()
+    mocked.assert_awaited_once()
     assert lines == [
         SaleLine(sku="GAS-COCA-1L", product_text="coca cola litro", quantity=2),
         SaleLine(sku=None, product_text="un pan", quantity=1),
@@ -121,7 +118,7 @@ async def test_extract_sales_validates_json_from_gemini():
 
 
 @pytest.mark.asyncio
-async def test_extract_stock_validates_json_from_gemini():
+async def test_extract_stock_validates_json_from_grok():
     payload = {"lines": [{"sku": "GAS-COCA-1L", "quantity": 8, "confidence": 0.7}]}
     with patch_generate([fake_response(payload)]):
         lines = await extract_stock(CATALOG, b"fake-image", "image/jpeg")
@@ -133,23 +130,23 @@ async def test_extract_sales_retries_invalid_json_then_succeeds():
     good = {"lines": [{"sku": None, "product_text": "coca litro", "quantity": 2}]}
     with patch_generate([fake_response("{no-json"), fake_response(good)]) as mocked:
         lines = await extract_sales(CATALOG, transcript="vendí 2 coca litro")
-    assert mocked.return_value.aio.models.generate_content.await_count == 2
+    assert mocked.await_count == 2
     assert lines[0].quantity == 2
 
 
 @pytest.mark.asyncio
 async def test_extract_sales_retries_once_then_raises_user_error():
     with patch_generate([TimeoutError("timeout"), TimeoutError("timeout")]) as mocked:
-        with pytest.raises(GeminiExtractError) as exc:
+        with pytest.raises(ExtractError) as exc:
             await extract_sales(CATALOG, transcript="vendí 2 coca")
-    assert mocked.return_value.aio.models.generate_content.await_count == 2
+    assert mocked.await_count == 2
     assert str(exc.value) == "No te entendí, intenta de nuevo o escríbelo"
 
 
 @pytest.mark.asyncio
 async def test_extract_stock_retries_quota_then_fails():
     with patch_generate([RuntimeError("quota"), fake_response("not-json")]):
-        with pytest.raises(GeminiExtractError) as exc:
+        with pytest.raises(ExtractError) as exc:
             await extract_stock(CATALOG, b"foto", "image/jpeg")
     assert exc.value.user_message == "No te entendí, intenta de nuevo o escríbelo"
 
@@ -158,5 +155,23 @@ async def test_extract_stock_retries_quota_then_fails():
 async def test_extract_sales_rejects_invalid_quantity_after_retry():
     bad = {"lines": [{"sku": None, "product_text": "coca", "quantity": 0}]}
     with patch_generate([fake_response(bad), fake_response(bad)]):
-        with pytest.raises(GeminiExtractError):
+        with pytest.raises(ExtractError):
             await extract_sales(CATALOG, transcript="vendí cero coca")
+
+
+@pytest.mark.asyncio
+async def test_extract_sales_from_voice_transcribes_first():
+    payload = {"lines": [{"sku": "PAN-TAJA-UND", "product_text": "un pan", "quantity": 1}]}
+    with patch("app.ai.grok_client.transcribe_audio", new=AsyncMock(return_value="vendí un pan")) as stt,             patch_generate([fake_response(payload)]) as chat:
+        lines = await extract_sales(CATALOG, audio_bytes=b"ogg", audio_mime_type="audio/ogg")
+    stt.assert_awaited_once_with(b"ogg", "audio/ogg")
+    assert "vendí un pan" in chat.await_args.args[0]
+    assert lines == [SaleLine(sku="PAN-TAJA-UND", product_text="un pan", quantity=1)]
+
+
+@pytest.mark.asyncio
+async def test_extract_sales_from_silent_voice_raises_user_error():
+    with patch("app.ai.grok_client.transcribe_audio", new=AsyncMock(return_value="")),             patch_generate([]) as chat:
+        with pytest.raises(ExtractError):
+            await extract_sales(CATALOG, audio_bytes=b"ogg", audio_mime_type="audio/ogg")
+    chat.assert_not_awaited()

@@ -1,0 +1,12 @@
+{# Íconos de línea (estilo Lucide), heredan el color del texto. #}
+{% macro svg(path) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ path|safe }}</svg>
+{%- endmacro %}
+
+{% macro arrow() %}{{ svg('<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>') }}{% endmacro %}
+{% macro store() %}{{ svg('<path d="M3 9 4.5 4h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-5h4v5"/>') }}{% endmacro %}
+{% macro alert() %}{{ svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>') }}{% endmacro %}
+{% macro box() %}{{ svg('<path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/>') }}{% endmacro %}
+{% macro mic() %}{{ svg('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/>') }}{% endmacro %}
+{% macro camera() %}{{ svg('<path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="4"/>') }}{% endmacro %}
+{% macro truck() %}{{ svg('<path d="M3 6h11v10H3z"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>') }}{% endmacro %}

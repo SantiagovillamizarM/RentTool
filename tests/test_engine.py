@@ -15,7 +15,7 @@ from app.inventory.engine import (
     classify_abc,
     compute_stock,
     daily_sales_series,
-    days_until_next_visit,
+    delivery_schedule,
 )
 
 # Miércoles 7 de octubre de 2026, mediodía en Colombia.
@@ -41,36 +41,60 @@ def count(pid: int, qty: int, days_ago: int = 30) -> CountEvent:
     return CountEvent(pid, qty, NOW - timedelta(days=days_ago))
 
 
-def run(products, sales=(), counts=(), receipts=(), visits="0,3", lead=1):
+# Entregas jueves y viernes: un pedido del miércoles llega el jueves y debe durar hasta
+# el viernes, así el horizonte es 2 días (cuentas fáciles en las pruebas).
+def run(products, sales=(), counts=(), receipts=(), visits="3,4", lead=1):
     return analyze_store(1, visits, lead, list(products), list(sales), list(counts), list(receipts), NOW)
 
 
-# --- Visitas -----------------------------------------------------------------
+# --- Entregas ----------------------------------------------------------------
+
+
+def at(day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, day, hour, minute, tzinfo=COLOMBIA_TZ)
 
 
 @pytest.mark.parametrize(
-    ("today", "expected"),
+    ("now", "next_delivery", "deadline", "following"),
     [
-        (date(2026, 10, 5), 3),  # lunes -> jueves
-        (date(2026, 10, 6), 2),  # martes -> jueves
-        (date(2026, 10, 7), 1),  # miércoles -> jueves
-        (date(2026, 10, 8), 4),  # jueves -> lunes (hoy ya no cuenta)
-        (date(2026, 10, 10), 2),  # sábado -> lunes
-        (date(2026, 10, 11), 1),  # domingo -> lunes
+        # Entregas lunes (5, 12) y jueves (8, 15); se pide hasta las 6 p. m. del día anterior.
+        (at(5, 9), date(2026, 10, 8), at(7, 18), date(2026, 10, 12)),  # lunes -> jueves
+        (at(7, 17, 59), date(2026, 10, 8), at(7, 18), date(2026, 10, 12)),  # miércoles antes de la hora
+        (at(7, 18), date(2026, 10, 12), at(11, 18), date(2026, 10, 15)),  # miércoles 6 p. m.: ya no alcanza
+        (at(8, 9), date(2026, 10, 12), at(11, 18), date(2026, 10, 15)),  # jueves (hoy hay entrega)
+        (at(11, 10), date(2026, 10, 12), at(11, 18), date(2026, 10, 15)),  # domingo en la mañana
     ],
 )
-def test_visits_monday_and_thursday(today, expected):
-    assert days_until_next_visit("0,3", today) == expected
+def test_delivery_schedule_monday_and_thursday(now, next_delivery, deadline, following):
+    schedule = delivery_schedule("0,3", 1, now)
+    assert schedule.next_delivery == next_delivery
+    assert schedule.order_deadline == deadline
+    assert schedule.following_delivery == following
 
 
-def test_visits_without_config_assume_weekly():
-    assert days_until_next_visit("", TODAY) == 7
-    assert days_until_next_visit("x,9", TODAY) == 7
+def test_delivery_schedule_lead_time_moves_deadline_back():
+    # Con 2 días de anticipación, el jueves 8 se pide hasta el martes 6; el miércoles ya no alcanza.
+    assert delivery_schedule("0,3", 2, at(6, 12)).next_delivery == date(2026, 10, 8)
+    schedule = delivery_schedule("0,3", 2, at(7, 9))
+    assert schedule.next_delivery == date(2026, 10, 12)
+    assert schedule.order_deadline == at(10, 18)
 
 
-def test_horizon_adds_lead_time():
-    result = run([product()], visits="0,3", lead=2)
-    assert result.horizon_days == 1 + 2
+def test_delivery_schedule_single_day_lasts_a_week():
+    schedule = delivery_schedule("4", 1, at(5, 9))  # solo viernes
+    assert (schedule.next_delivery, schedule.following_delivery) == (date(2026, 10, 9), date(2026, 10, 16))
+
+
+def test_delivery_schedule_without_config_assumes_monday():
+    assert delivery_schedule("", 1, NOW).next_delivery == date(2026, 10, 12)
+    assert delivery_schedule("x,9", 1, NOW).next_delivery == date(2026, 10, 12)
+
+
+def test_horizon_lasts_until_the_following_delivery():
+    # Miércoles 7 al mediodía con entregas lunes y jueves: llega el jueves 8, dura hasta el lunes 12.
+    result = run([product()], visits="0,3", lead=1)
+    assert result.next_delivery == date(2026, 10, 8)
+    assert result.horizon_days == 5
 
 
 # --- Stock -------------------------------------------------------------------
@@ -153,7 +177,7 @@ def test_high_stock_no_order_and_stagnant_by_coverage():
 
 
 def test_low_stock_is_at_risk_with_reason():
-    # Vende 6 al día, quedan 6: alcanza para 1 día; horizonte = 1 + 1 = 2.
+    # Vende 6 al día, quedan 6: alcanza para 1 día; horizonte = 2.
     result = run([product()], sales=daily_sales(1, 6), counts=[count(1, 6, days_ago=0)])
     p = result.products[0]
     assert p.daily_sales == 6

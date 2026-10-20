@@ -1,20 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Demanda{% endblock %}
 {% block content %}
-<h1>Demanda de los próximos 7 días</h1>
-<p class="muted">Suma de la venta diaria × 7 en tus {{ stores_total }} tienda{{ '' if stores_total == 1 else 's' }}, redondeada hacia arriba.</p>
+<header class="page-head">
+  <span class="eyebrow">Demanda agregada</span>
+  <h1>Lo que vas a despachar <span class="accent">la próxima semana</span></h1>
+  <p>Venta diaria × 7 de cada producto, sumada en tus {{ stores_total }} tienda{{ '' if stores_total == 1 else 's' }} y redondeada hacia arriba a cajas completas.</p>
+</header>
+
 <section class="card">
   {% if rows %}
+  {% set top = rows[0].units or 1 %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Producto</th><th>SKU</th><th class="num">Unidades</th><th class="num">Unid. por caja</th><th class="num">Cajas</th></tr></thead>
+      <thead><tr><th>Producto</th><th>Unidades en 7 días</th><th class="num">Unid. por caja</th><th class="num">Cajas</th></tr></thead>
       <tbody>
         {% for row in rows %}
         <tr>
-          <td>{{ row.name }}</td>
-          <td class="muted">{{ row.sku }}</td>
-          <td class="num">{{ row.units }}</td>
-          <td class="num">{{ row.units_per_case }}</td>
+          <td><strong>{{ row.name }}</strong><br><span class="muted small">{{ row.sku }}</span></td>
+          <td>
+            <div class="meter">
+              <div class="meter-track"><div class="meter-fill" style="width: {{ (100 * row.units / top)|round }}%"></div></div>
+              <span class="meter-value">{{ row.units }}</span>
+            </div>
+          </td>
+          <td class="num muted">{{ row.units_per_case }}</td>
           <td class="num"><strong>{{ row.cases }}</strong></td>
         </tr>
         {% endfor %}
@@ -22,7 +31,7 @@
     </table>
   </div>
   {% else %}
-  <p class="muted">Aún no hay ventas para proyectar.</p>
+  <p class="empty">Aún no hay ventas para proyectar.</p>
   {% endif %}
 </section>
 {% endblock %}

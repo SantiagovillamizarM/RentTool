@@ -8,7 +8,8 @@ import math
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -26,6 +27,8 @@ STAGNANT_COVERAGE_DAYS = 45
 ABC_A_LIMIT = 0.80
 ABC_B_LIMIT = 0.95
 PROJECTION_DAYS = 7
+# Hora límite para pedir (hora Colombia), `lead_time_days` días antes de la entrega.
+ORDER_CUTOFF_HOUR = 18
 
 
 @dataclass(frozen=True)
@@ -96,11 +99,20 @@ class OrderLine:
     reason: str
 
 
+@dataclass(frozen=True)
+class DeliverySchedule:
+    next_delivery: date  # la próxima entrega a la que todavía alcanza un pedido hecho hoy
+    order_deadline: datetime  # hasta cuándo se puede pedir para esa entrega (hora Colombia)
+    following_delivery: date  # la entrega siguiente: lo que se pide hoy debe durar hasta ese día
+
+
 @dataclass
 class StoreAnalysis:
     store_id: int
     as_of: datetime
     horizon_days: int
+    next_delivery: date
+    order_deadline: datetime
     products: list[ProductAnalysis] = field(default_factory=list)
     order_lines: list[OrderLine] = field(default_factory=list)
 
@@ -135,17 +147,29 @@ def parse_visit_weekdays(raw: str) -> list[int]:
     return sorted(days)
 
 
-def days_until_next_visit(visit_weekdays: str, today: date) -> int:
-    """Días hasta la próxima visita, estrictamente después de hoy (1..7).
+def _deliveries_after(start: date, weekdays: list[int]) -> Iterator[date]:
+    day = start
+    while True:
+        day += timedelta(days=1)
+        if day.weekday() in weekdays:
+            yield day
 
-    Si hoy es día de visita, el pedido de hoy ya no alcanza: se cuenta la siguiente.
-    Sin días configurados se asume una visita semanal (7).
+
+def delivery_schedule(delivery_weekdays: str, lead_time_days: int, now: datetime) -> DeliverySchedule:
+    """Entregas y hora límite para un pedido hecho en `now`.
+
+    Un pedido alcanza una entrega si se envía antes de las 6 p. m. hora Colombia,
+    `lead_time_days` días antes (mínimo 1). Sin días configurados se asume entrega los lunes.
     """
-    days = parse_visit_weekdays(visit_weekdays)
-    if not days:
-        return 7
-    current = today.weekday()
-    return min(((d - current - 1) % 7) + 1 for d in days)
+    weekdays = parse_visit_weekdays(delivery_weekdays) or [0]
+    lead = max(1, lead_time_days)
+    local_now = _ensure_aware(now).astimezone(COLOMBIA_TZ)
+    for delivery in _deliveries_after(local_now.date(), weekdays):
+        deadline = datetime.combine(delivery - timedelta(days=lead), time(ORDER_CUTOFF_HOUR), COLOMBIA_TZ)
+        if local_now < deadline:
+            following = next(_deliveries_after(delivery, weekdays))
+            return DeliverySchedule(delivery, deadline, following)
+    raise AssertionError("unreachable: delivery weekdays is never empty")
 
 
 def compute_stock(
@@ -286,7 +310,9 @@ def analyze_store(
 ) -> StoreAnalysis:
     now = _ensure_aware(now)
     today = local_date(now)
-    horizon = days_until_next_visit(visit_weekdays, today) + max(0, lead_time_days)
+    # Lo que se pide hoy llega en la próxima entrega y debe durar hasta la siguiente.
+    schedule = delivery_schedule(visit_weekdays, lead_time_days, now)
+    horizon = (schedule.following_delivery - today).days
 
     sales_by_product: dict[int, list[SaleEvent]] = defaultdict(list)
     counts_by_product: dict[int, list[CountEvent]] = defaultdict(list)
@@ -336,6 +362,8 @@ def analyze_store(
         store_id=store_id,
         as_of=now,
         horizon_days=horizon,
+        next_delivery=schedule.next_delivery,
+        order_deadline=schedule.order_deadline,
         products=analyses,
         order_lines=order_lines,
     )

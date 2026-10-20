@@ -1,14 +1,20 @@
 {% extends "base.html" %}
+{% import "_icons.html" as icon %}
 {% block title %}Tiendas{% endblock %}
 {% block content %}
-<h1>Tiendas</h1>
+<header class="page-head">
+  <span class="eyebrow">Tiendas</span>
+  <h1>Cada tienda, <span class="accent">de un vistazo</span></h1>
+  <p>Productos en riesgo, lo que no se vende y cuánto suma el pedido sugerido de cada una. Para vincular una tienda, pásale su código al tendero: lo escribe en el bot después de <strong>/start</strong>.</p>
+</header>
+
 <section class="card">
   {% if rows %}
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Tienda</th><th>Dueño</th><th>Vinculada</th>
+          <th>Tienda</th><th>Bot</th><th>Días de entrega</th>
           <th class="num">En riesgo</th><th class="num">Estancados</th>
           <th class="num">Pedido sugerido</th><th></th>
         </tr>
@@ -16,20 +22,25 @@
       <tbody>
         {% for row in rows %}
         <tr>
-          <td>{{ row.store.name }}</td>
-          <td>{{ row.store.owner_name }}</td>
-          <td>{% if row.linked %}<span class="badge badge-ok">Sí</span>{% else %}<span class="badge badge-muted">No</span>{% endif %}</td>
-          <td class="num">{% if row.at_risk %}<span class="badge badge-risk">{{ row.at_risk }}</span>{% else %}0{% endif %}</td>
-          <td class="num">{% if row.stagnant %}<span class="badge badge-stale">{{ row.stagnant }}</span>{% else %}0{% endif %}</td>
-          <td class="num">{{ row.order_total|cop }}</td>
-          <td><a href="/panel/tiendas/{{ row.store.id }}">Ver detalle</a></td>
+          <td>
+            <div class="name-cell">
+              <span class="avatar">{{ row.store.name.split()[-1][:1] }}</span>
+              <div><strong>{{ row.store.name }}</strong><span>{{ row.store.owner_name }}</span></div>
+            </div>
+          </td>
+          <td>{% if row.linked %}<span class="badge badge-ok">Vinculada</span>{% else %}<span class="badge badge-muted">Sin vincular</span><br><span class="muted small">Código <strong class="code">{{ row.store.link_code }}</strong></span>{% endif %}</td>
+          <td>{{ row.delivery_days|capitalize }}{% if not row.store.delivery_days_set_at %} <span class="muted small">(sin confirmar)</span>{% endif %}</td>
+          <td class="num">{% if row.at_risk %}<span class="badge badge-risk">{{ row.at_risk }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+          <td class="num">{% if row.stagnant %}<span class="badge badge-stale">{{ row.stagnant }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+          <td class="num"><strong>{{ row.order_total|cop }}</strong></td>
+          <td class="num"><a class="row-link" href="/panel/tiendas/{{ row.store.id }}">Ver detalle {{ icon.arrow() }}</a></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="muted">Aún no tienes tiendas.</p>
+  <p class="empty">Aún no tienes tiendas.</p>
   {% endif %}
 </section>
 {% endblock %}

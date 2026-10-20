@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict, deque
 from time import monotonic
 
@@ -35,6 +36,18 @@ class LoginRateLimiter:
             return False
         hits.append(now)
         return True
+
+    def retry_after(self, key: str, now: float | None = None) -> int:
+        """Segundos que faltan para poder intentar de nuevo (0 = puede intentar). No registra intento."""
+        now = monotonic() if now is None else now
+        hits = self._hits.get(key)
+        if not hits:
+            return 0
+        while hits and now - hits[0] >= self.window_seconds:
+            hits.popleft()
+        if len(hits) < self.max_attempts:
+            return 0
+        return max(1, math.ceil(self.window_seconds - (now - hits[0])))
 
 
 login_limiter = LoginRateLimiter()

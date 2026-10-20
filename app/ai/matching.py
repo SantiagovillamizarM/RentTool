@@ -1,6 +1,6 @@
 from rapidfuzz import fuzz, process
 
-from app.schemas import SaleLine, StockLine
+from app.schemas import OrderChange, SaleLine, StockLine
 
 MATCH_THRESHOLD = 80
 
@@ -92,3 +92,10 @@ def match_stock_lines(lines: list[StockLine], products: list[dict]) -> list[Stoc
         sku = resolve_sku(line.sku, "", products)
         matched.append(line.model_copy(update={"sku": sku}))
     return matched
+
+
+def match_order_changes(changes: list[OrderChange], products: list[dict]) -> list[OrderChange]:
+    return [
+        change.model_copy(update={"sku": resolve_sku(change.sku, change.product_text, products)})
+        for change in changes
+    ]

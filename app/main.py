@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import logging
 from collections.abc import AsyncIterator
@@ -5,12 +6,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from telegram import Update
 from telegram.ext import Application
 
 from app.bot.handlers import register_handlers
+from app.bot.reminders import reminder_loop
 from app.config import get_settings
 from app.web.routes import router as panel_router
 
@@ -64,9 +67,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("Bot en modo polling")
 
+    reminders = asyncio.create_task(reminder_loop(application.bot))
     try:
         yield
     finally:
+        reminders.cancel()
         if settings.bot_mode == "polling" and application.updater is not None:
             await application.updater.stop()
         await application.stop()
@@ -90,6 +95,12 @@ app.mount(
     StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
     name="panel_static",
 )
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    # La raíz lleva al panel; sin sesión, el panel redirige al login.
+    return RedirectResponse("/panel", status_code=303)
 
 
 @app.get("/health")

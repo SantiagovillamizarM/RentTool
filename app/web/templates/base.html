@@ -4,27 +4,92 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Panel{% endblock %} · TenderoBot</title>
-  <link rel="stylesheet" href="/panel/static/panel.css">
+  <link rel="icon" type="image/png" href="/panel/static/favicon.png?v={{ static_version }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@1&display=swap">
+  <link rel="stylesheet" href="/panel/static/panel.css?v={{ static_version }}">
 </head>
-<body>
+<body{% if active is defined %} data-live="{% block live %}reload{% endblock %}"{% endif %}>
   {% if active is defined %}
   <header class="topbar">
     <div class="topbar-inner">
-      <a class="brand" href="/panel">TenderoBot <span>· Panel</span></a>
-      <nav class="menu">
+      <a class="brand" href="/panel">
+        <img src="/panel/static/logo.png" alt="">
+        <span>TenderoBot<small>Panel del distribuidor</small></span>
+      </a>
+      <nav class="menu" aria-label="Secciones">
         <a href="/panel" class="{{ 'on' if active == 'overview' }}">Resumen</a>
         <a href="/panel/tiendas" class="{{ 'on' if active == 'stores' }}">Tiendas</a>
         <a href="/panel/demanda" class="{{ 'on' if active == 'demand' }}">Demanda</a>
+        <a href="/panel/productos" class="{{ 'on' if active == 'products' }}">Productos</a>
       </nav>
-      <form method="post" action="/panel/logout" class="logout">
-        <button type="submit">Salir</button>
-      </form>
+      <div class="topbar-actions">
+        <span class="live-pill" id="live-pill" title="El panel se actualiza solo con lo que llega de Telegram"><span class="live-dot"></span><span class="live-text">En vivo</span></span>
+        <form method="post" action="/panel/logout" class="logout">
+          <button type="submit">Salir</button>
+        </form>
+      </div>
     </div>
   </header>
   {% endif %}
   <main class="page">
     {% block content %}{% endblock %}
   </main>
+  {% if active is defined %}
+  <div class="live-toast" id="live-toast" role="status" hidden>
+    <span class="live-dot"></span>
+    <span>Llegaron datos nuevos desde Telegram.</span>
+    <button type="button" class="small-btn" id="live-refresh">Actualizar</button>
+  </div>
+  <script>
+    // Panel en vivo: consulta si cambió algo y se actualiza solo (o avisa si estás editando).
+    (function () {
+      var mode = document.body.dataset.live;
+      var pill = document.getElementById("live-pill");
+      var toast = document.getElementById("live-toast");
+      var version = null;
+      try {
+        var y = sessionStorage.getItem("tenderobot-scroll");
+        if (y !== null) { sessionStorage.removeItem("tenderobot-scroll"); window.scrollTo(0, parseInt(y, 10)); }
+      } catch (e) {}
+
+      function reload() {
+        try { sessionStorage.setItem("tenderobot-scroll", String(window.scrollY)); } catch (e) {}
+        window.location.reload();
+      }
+      function busy() {
+        var el = document.activeElement;
+        return document.querySelector(".modal-overlay:not([hidden]), .sales-row") ||
+          (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName));
+      }
+      function check() {
+        if (document.hidden) { return; }
+        fetch("/panel/actualizacion", { headers: { Accept: "application/json" }, cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok || (r.headers.get("content-type") || "").indexOf("json") < 0) { throw new Error(); }
+            return r.json();
+          })
+          .then(function (data) {
+            pill.classList.remove("off");
+            pill.querySelector(".live-text").textContent = "En vivo";
+            if (version === null) { version = data.version; return; }
+            if (data.version === version) { return; }
+            version = data.version;
+            if (mode === "reload" && !busy()) { reload(); } else { toast.hidden = false; }
+          })
+          .catch(function () {
+            pill.classList.add("off");
+            pill.querySelector(".live-text").textContent = "Sin conexión";
+          });
+      }
+      document.getElementById("live-refresh").addEventListener("click", reload);
+      document.addEventListener("visibilitychange", check);
+      check();
+      setInterval(check, 8000);
+    })();
+  </script>
+  {% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

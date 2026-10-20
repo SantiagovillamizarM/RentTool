@@ -1,51 +1,102 @@
 {% extends "base.html" %}
+{% import "_icons.html" as icon %}
 {% block title %}{{ store.name }}{% endblock %}
 {% block content %}
 <p class="crumb"><a href="/panel/tiendas">← Tiendas</a></p>
-<h1>{{ store.name }}</h1>
-<p class="muted">{{ store.owner_name }} · próxima entrega en {{ analysis.horizon_days }} día{{ '' if analysis.horizon_days == 1 else 's' }}</p>
+<header class="page-head">
+  <span class="eyebrow">{{ store.owner_name }}</span>
+  <h1>{{ store.name }}</h1>
+  <div class="chips">
+    <span class="chip">Entregas <strong>{{ delivery_days }}</strong></span>
+    <span class="chip">Próxima entrega <strong>{{ analysis.next_delivery|day }}</strong></span>
+    <span class="chip">Pedido hasta <strong>{{ analysis.order_deadline|deadline }}</strong></span>
+  </div>
+</header>
 
 <section class="card">
-  <h2>Unidades vendidas por día (últimos 28 días)</h2>
+  <div class="card-head">
+    <h2>Unidades vendidas por día</h2>
+    <span class="muted">Últimos 28 días</span>
+  </div>
+  {% if chart["values"]|sum > 0 %}
   <div class="chart-box"><canvas id="sales-chart" aria-label="Unidades vendidas por día" role="img"></canvas></div>
   <script type="application/json" id="sales-data">{{ chart|tojson }}</script>
-</section>
-
-<section class="card">
-  <h2>Pedido sugerido</h2>
-  {% if analysis.order_lines %}
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Producto</th><th class="num">Cajas</th><th class="num">Unidades</th><th>Motivo</th><th class="num">Subtotal</th></tr></thead>
-      <tbody>
-        {% for line in analysis.order_lines %}
-        <tr>
-          <td>{{ line.name }}</td>
-          <td class="num">{{ line.cases }}</td>
-          <td class="num">{{ line.units }}</td>
-          <td>{{ line.reason }}</td>
-          <td class="num">{{ line.subtotal|cop }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-      <tfoot><tr><td colspan="4">Total</td><td class="num">{{ analysis.order_total|cop }}</td></tr></tfoot>
-    </table>
-  </div>
   {% else %}
-  <p class="muted">No hace falta pedir nada por ahora.</p>
+  <p class="empty">Aún no hay ventas registradas. Aparecen aquí apenas el tendero las confirme en Telegram.</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Productos</h2>
+    <div class="card-head">
+      <h2>Pedido sugerido</h2>
+      <span class="muted">Para el {{ analysis.next_delivery|day }}</span>
+    </div>
+    {% if availability_notes %}<p class="muted small">Ajustado a tus existencias: {{ availability_notes|join(', ') }}.</p>{% endif %}
+    {% if order_lines %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Cajas</th><th class="num">Unidades</th><th>Motivo</th><th class="num">Subtotal</th></tr></thead>
+        <tbody>
+          {% for line in order_lines %}
+          <tr>
+            <td><strong>{{ line.name }}</strong></td>
+            <td class="num">{{ line.cases }}</td>
+            <td class="num muted">{{ line.units }}</td>
+            <td class="wrap">{{ line.reason }}</td>
+            <td class="num">{{ line.subtotal|cop }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ order_total|cop }}</td></tr></tfoot>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No hace falta pedir nada por ahora.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Pedidos enviados</h2>
+      <span class="muted">Por despachar</span>
+    </div>
+    {% if sent_orders %}
+    <div class="table-wrap">
+      <table style="min-width: 0">
+        <thead><tr><th>Enviado</th><th>Entrega</th><th class="num">Valor</th></tr></thead>
+        <tbody>
+          {% for order in sent_orders %}
+          <tr>
+            <td class="muted">{{ order.created_at|local_dt }}</td>
+            <td><span class="badge badge-amber">{{ order.delivery_date|day if order.delivery_date else "—" }}</span></td>
+            <td class="num"><strong>{{ order.value|cop }}</strong></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">Esta tienda no tiene pedidos por despachar.</p>
+    {% endif %}
+  </section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Productos</h2>
+    <div class="legend">
+      <span><span class="abc abc-a">A</span> 80 % de las ventas</span>
+      <span><span class="abc abc-b">B</span> siguiente 15 %</span>
+      <span><span class="abc abc-c">C</span> el resto</span>
+    </div>
+  </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Venta diaria</th><th class="num">Cobertura</th><th>ABC</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Venta diaria</th><th class="num">Cobertura</th><th>Rotación</th><th>Estado</th></tr></thead>
       <tbody>
         {% for p in products %}
         {% set state = product_status(p) %}
         <tr>
-          <td>{{ p.name }}{% if not p.has_count %} <span class="muted small">(sin conteo)</span>{% endif %}</td>
+          <td><strong>{{ p.name }}</strong>{% if not p.has_count %} <span class="muted small">(sin conteo)</span>{% endif %}</td>
           <td class="num">{{ p.stock }}</td>
           <td class="num">{{ p.daily_sales|qty }}</td>
           <td class="num">{{ p.coverage_days|coverage }}</td>
@@ -61,33 +112,21 @@
     </table>
   </div>
 </section>
-
-<section class="card">
-  <h2>Pedidos enviados</h2>
-  {% if sent_orders %}
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Fecha</th><th class="num">Valor</th></tr></thead>
-      <tbody>
-        {% for order in sent_orders %}
-        <tr><td>{{ order.created_at|local_dt }}</td><td class="num">{{ order.value|cop }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <p class="muted">Esta tienda no tiene pedidos enviados pendientes.</p>
-  {% endif %}
-</section>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
   (function () {
-    var data = JSON.parse(document.getElementById("sales-data").textContent);
     var canvas = document.getElementById("sales-chart");
     if (!window.Chart || !canvas) { return; }
+    var data = JSON.parse(document.getElementById("sales-data").textContent);
+    var ctx = canvas.getContext("2d");
+    var fill = ctx.createLinearGradient(0, 0, 0, 300);
+    fill.addColorStop(0, "rgba(246, 190, 69, 0.35)");
+    fill.addColorStop(1, "rgba(246, 190, 69, 0)");
+    Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+    Chart.defaults.color = "#8d99b0";
     new Chart(canvas, {
       type: "line",
       data: {
@@ -95,21 +134,44 @@
         datasets: [{
           label: "Unidades",
           data: data.values,
-          borderColor: "#0B1F3A",
-          backgroundColor: "rgba(11, 31, 58, 0.08)",
-          pointBackgroundColor: "#E0A100",
-          pointRadius: 3,
-          borderWidth: 2,
-          tension: 0.25,
-          fill: true
+          borderColor: "#f6be45",
+          backgroundColor: fill,
+          borderWidth: 2.5,
+          tension: 0.4,
+          fill: true,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+          pointHoverBackgroundColor: "#f6be45",
+          pointHoverBorderColor: "#041c4b",
+          pointHoverBorderWidth: 3
         }]
       },
       options: {
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "rgba(4, 28, 75, 0.95)",
+            borderColor: "rgba(246, 190, 69, 0.4)",
+            borderWidth: 1,
+            padding: 10,
+            displayColors: false,
+            callbacks: { label: function (item) { return item.parsed.y + " unidades"; } }
+          }
+        },
         scales: {
-          y: { beginAtZero: true, ticks: { precision: 0 } },
-          x: { grid: { display: false } }
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: "rgba(255, 255, 255, 0.06)" },
+            border: { display: false }
+          },
+          x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { maxRotation: 0, autoSkipPadding: 16 }
+          }
         }
       }
     });

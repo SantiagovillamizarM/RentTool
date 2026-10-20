@@ -41,6 +41,8 @@ def store(store_id: int, products: list[ProductAnalysis]) -> StoreAnalysis:
         store_id=store_id,
         as_of=datetime(2026, 10, 7, tzinfo=timezone.utc),
         horizon_days=2,
+        next_delivery=date(2026, 10, 8),
+        order_deadline=datetime(2026, 10, 7, 23, tzinfo=timezone.utc),
         products=products,
     )
 
@@ -143,3 +145,94 @@ async def test_panel_without_session_redirects_to_login():
 
         health = await client.get("/health")
         assert health.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_root_redirects_to_panel_and_login():
+    from app.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        root = await client.get("/")
+        assert root.status_code == 303
+        assert root.headers["location"] == "/panel"
+        followed = await client.get("/", follow_redirects=True)
+        assert str(followed.url).endswith("/panel/login")
+        assert "Ingresar" in followed.text
+
+
+def test_rate_limiter_reports_seconds_left():
+    limiter = LoginRateLimiter(max_attempts=2, window_seconds=60)
+    assert limiter.retry_after("ip", now=0) == 0
+    assert limiter.allow("ip", now=0)
+    assert limiter.allow("ip", now=10)
+    assert limiter.retry_after("ip", now=10) == 50  # el intento del segundo 0 vence en el 60
+    assert not limiter.allow("ip", now=20)
+    assert limiter.retry_after("ip", now=59.2) == 1
+    assert limiter.retry_after("ip", now=60) == 0  # ya venció el primero: puede intentar
+    assert limiter.retry_after("otra", now=0) == 0
+
+
+@pytest.mark.asyncio
+async def test_login_shows_countdown_overlay_when_blocked():
+    from app.main import app
+    from app.web.auth import login_limiter
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        assert 'id="lock"' not in (await client.get("/panel/login")).text
+        saved = login_limiter._hits.pop("127.0.0.1", None)
+        try:
+            for _ in range(login_limiter.max_attempts):
+                login_limiter.allow("127.0.0.1")
+            page = await client.get("/panel/login")
+            assert 'id="lock"' in page.text
+            assert "Demasiados intentos" in page.text
+            blocked = await client.post("/panel/login", data={"email": "x@x.co", "password": "x"})
+            assert blocked.status_code == 429
+            assert 'id="lock"' in blocked.text
+        finally:
+            login_limiter._hits.pop("127.0.0.1", None)
+            if saved is not None:
+                login_limiter._hits["127.0.0.1"] = saved
+
+
+def test_weekday_sales_by_store_in_colombia_time():
+    from datetime import timedelta
+
+    from app.inventory.engine import COLOMBIA_TZ
+    from app.web.aggregations import weekday_sales
+
+    friday_noon = datetime(2026, 10, 9, 12, tzinfo=COLOMBIA_TZ)  # viernes
+    rows = [
+        (1, friday_noon, 5),
+        (1, friday_noon + timedelta(days=7), 3),  # otro viernes
+        (2, datetime(2026, 10, 5, 9, tzinfo=COLOMBIA_TZ), 4),  # lunes
+        # Sábado 00:30 en UTC = viernes 7:30 p. m. en Colombia: cuenta como viernes.
+        (2, datetime(2026, 10, 10, 0, 30, tzinfo=timezone.utc), 2),
+        (9, friday_noon, 100),  # tienda de otro distribuidor: se ignora
+    ]
+    data = weekday_sales(rows, [(1, "Doña Marta"), (2, "El Parque"), (3, "Sin ventas")])
+    assert data["labels"] == ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    by_id = {store["id"]: store for store in data["stores"]}
+    assert by_id[1]["values"] == [0, 0, 0, 0, 8, 0, 0] and by_id[1]["total"] == 8
+    assert by_id[2]["values"] == [4, 0, 0, 0, 2, 0, 0] and by_id[2]["total"] == 6
+    assert by_id[3]["values"] == [0] * 7 and by_id[3]["total"] == 0
+    assert [store["name"] for store in data["stores"]] == ["Doña Marta", "El Parque", "Sin ventas"]
+
+
+def test_demand_skips_products_without_sales():
+    rows = aggregate_demand([store(1, [product(1, 0.0), product(2, 1.0)]), store(2, [product(1, 0.0)])])
+    assert [row.product_id for row in rows] == [2]
+    assert aggregate_demand([store(1, [product(1, 0.0)])]) == []
+
+
+@pytest.mark.asyncio
+async def test_live_version_requires_login():
+    from app.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/panel/actualizacion")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/panel/login"

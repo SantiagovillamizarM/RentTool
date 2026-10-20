@@ -1,16 +1,96 @@
 {% extends "base.html" %}
+{% import "_icons.html" as icon %}
 {% block title %}Ingresar{% endblock %}
 {% block content %}
-<section class="login-card">
-  <h1>TenderoBot <span>· Panel</span></h1>
-  <p class="muted">Ingresa con tu cuenta de distribuidor.</p>
-  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
-  <form method="post" action="/panel/login">
-    <label for="email">Correo</label>
-    <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" required>
-    <label for="password">Contraseña</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit" class="primary">Ingresar</button>
-  </form>
-</section>
+<div class="login">
+  <section class="login-hero">
+    <div class="login-orb"></div>
+    <a class="brand" href="/panel/login">
+      <img src="/panel/static/logo.png" alt="">
+      <span>TenderoBot<small>Panel del distribuidor</small></span>
+    </a>
+    <span class="eyebrow">Inventario con IA para tiendas de barrio</span>
+    <h1>Tus tiendas, <span class="accent">siempre surtidas.</span></h1>
+    <p>Mira qué se les va a acabar a tus tenderos, qué no se vende y cuánto vas a despachar la próxima semana. Los datos llegan solos desde Telegram.</p>
+    <div class="feature-row">
+      <div class="feature">{{ icon.mic() }}<strong>Ventas por voz</strong><span>El tendero dice lo que vendió</span></div>
+      <div class="feature">{{ icon.camera() }}<strong>Foto del estante</strong><span>Conteo en segundos</span></div>
+      <div class="feature">{{ icon.truck() }}<strong>Pedido sugerido</strong><span>Solo lo que hace falta</span></div>
+    </div>
+  </section>
+
+  <section class="login-card">
+    <h2>Ingresar</h2>
+    <p>Usa tu cuenta de distribuidor.</p>
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/panel/login">
+      <label for="email">Correo</label>
+      <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" placeholder="tu@empresa.co" required>
+      <label for="password">Contraseña</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      <button type="submit" class="primary" {{ 'disabled' if retry_after }}>Entrar al panel <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </form>
+    <p class="login-foot">Cada distribuidor ve solo sus tiendas.</p>
+  </section>
+</div>
+
+{% if retry_after %}
+<div class="lock-overlay" id="lock" role="alertdialog" aria-modal="true" aria-labelledby="lock-title" aria-describedby="lock-desc"
+     data-seconds="{{ retry_after }}" data-total="{{ [retry_after, 60]|max }}">
+  <div class="lock-card">
+    <div class="lock-ring">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="lock-track" cx="60" cy="60" r="52"></circle>
+        <circle class="lock-progress" id="lock-progress" cx="60" cy="60" r="52"></circle>
+      </svg>
+      <div class="lock-count"><strong id="lock-seconds">{{ retry_after }}</strong><span>seg</span></div>
+    </div>
+    <span class="lock-icon">{{ icon.svg('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>') }}</span>
+    <h2 id="lock-title">Demasiados intentos</h2>
+    <p id="lock-desc">Por seguridad pausamos el ingreso un momento. Podrás intentar de nuevo cuando termine la cuenta.</p>
+    <p class="lock-hint" aria-live="polite">Vuelve a intentar en <strong id="lock-text">{{ retry_after }} segundos</strong></p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if retry_after %}
+<script>
+  (function () {
+    var overlay = document.getElementById("lock");
+    var left = parseInt(overlay.dataset.seconds, 10);
+    var total = parseInt(overlay.dataset.total, 10);
+    var ring = document.getElementById("lock-progress");
+    var seconds = document.getElementById("lock-seconds");
+    var text = document.getElementById("lock-text");
+    var button = document.querySelector(".login-card button[type=submit]");
+    var circumference = 2 * Math.PI * 52;
+    ring.setAttribute("stroke-dasharray", circumference.toFixed(2));
+    var endsAt = Date.now() + left * 1000;
+
+    function paint(remaining) {
+      seconds.textContent = remaining;
+      text.textContent = remaining === 1 ? "1 segundo" : remaining + " segundos";
+      ring.setAttribute("stroke-dashoffset", (circumference * (1 - remaining / total)).toFixed(2));
+    }
+
+    function tick() {
+      var remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+      paint(remaining);
+      if (remaining > 0) { return; }
+      clearInterval(timer);
+      overlay.classList.add("lock-done");
+      button.disabled = false;
+      setTimeout(function () {
+        overlay.remove();
+        document.getElementById("password").focus();
+      }, 350);
+    }
+
+    paint(left);
+    var timer = setInterval(tick, 250);
+  })();
+</script>
+{% endif %}
 {% endblock %}

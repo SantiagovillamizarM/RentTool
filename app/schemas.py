@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,3 +43,11 @@ class StockLine(BaseModel):
     sku: str | None = None
     quantity: int = Field(ge=0)
     confidence: float = Field(ge=0, le=1)
+
+
+class OrderChange(BaseModel):
+    sku: str | None = None
+    product_text: str = ""
+    action: Literal["add", "remove", "set"]
+    quantity: int = Field(ge=0)
+    unit: Literal["case", "unit"] = "case"

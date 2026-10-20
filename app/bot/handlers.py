@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from time import monotonic
 
 from sqlalchemy import func, select
@@ -19,11 +19,18 @@ from telegram.ext import (
     filters,
 )
 
-from app.ai.gemini_client import GeminiExtractError, extract_sales, extract_stock
-from app.ai.matching import best_product_match, match_sale_lines, match_stock_lines
+from app.ai.grok_client import (
+    ExtractError,
+    extract_order_changes,
+    extract_sales,
+    extract_stock,
+    transcribe_audio,
+)
+from app.ai.matching import best_product_match, match_order_changes, match_sale_lines, match_stock_lines
 from app.bot import keyboards, texts
 from app.db import SessionLocal
-from app.inventory.engine import load_store_analysis
+from app.inventory.engine import delivery_schedule, load_store_analysis, parse_visit_weekdays
+from app.inventory.orders import apply_order_changes, cap_to_available, order_total, to_order_lines
 from app.models import (
     PendingAction,
     Product,
@@ -41,6 +48,8 @@ RATE_LIMIT_WINDOW_SECONDS = 60.0
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_VOICE_SECONDS = 120
 PENDING_TTL = timedelta(minutes=15)
+# El borrador del pedido dura más: el tendero puede ir ajustándolo durante el día.
+ORDER_PENDING_TTL = timedelta(hours=6)
 
 _chat_hits: dict[int, deque[float]] = defaultdict(deque)
 
@@ -136,7 +145,21 @@ async def require_ready_store(update: Update, session: AsyncSession) -> Store | 
     if store.consent_at is None:
         await _reply(update, texts.NEED_CONSENT, reply_markup=keyboards.consent_keyboard())
         return None
+    if store.delivery_days_set_at is None:
+        await _reply(update, texts.NEED_DAYS)
+        await ask_days(update, store)
+        return None
     return store
+
+
+def route_days(store: Store) -> list[int]:
+    """Días en que el proveedor pasa por la zona. Sin configurar: toda la semana."""
+    return parse_visit_weekdays(store.route_weekdays) or list(range(7))
+
+
+async def ask_days(update: Update, store: Store) -> None:
+    days = route_days(store)
+    await _reply(update, texts.ask_days(days), reply_markup=keyboards.days_keyboard(days, []))
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -148,8 +171,14 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if store is None:
             await _reply(update, texts.ASK_CODE)
             return
+        # Siempre se saluda primero y luego se retoma el paso que falte.
         if store.consent_at is None:
+            await _reply(update, texts.INTRO)
             await _reply(update, texts.CONSENT_NOTICE, reply_markup=keyboards.consent_keyboard())
+            return
+        if store.delivery_days_set_at is None:
+            await _reply(update, texts.start_needs_days(store.name))
+            await ask_days(update, store)
             return
         await _reply(update, texts.START_LINKED)
 
@@ -199,7 +228,48 @@ async def handle_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if store.consent_at is None:
             store.consent_at = datetime.now(UTC)
         await _reply(update, texts.WELCOME.format(owner=store.owner_name))
+        if store.delivery_days_set_at is None:
+            await ask_days(update, store)
     await _remove_buttons(update)
+
+
+async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Marca/desmarca días de entrega y, con "Listo", los guarda (solo la primera vez)."""
+    query = update.callback_query
+    chat_id = _chat_id(update)
+    if query is None or chat_id is None or not query.data:
+        return
+    selected, action = keyboards.parse_days_callback(query.data)
+    async with session_scope() as session:
+        store = await get_store_by_chat(session, chat_id)
+        if store is None or store.consent_at is None:
+            await query.answer()
+            await _reply(update, texts.NEED_LINK)
+            return
+        if store.delivery_days_set_at is not None:
+            # Botón viejo: los días ya quedaron escogidos.
+            await query.answer()
+            await _remove_buttons(update)
+            return
+        allowed = route_days(store)
+        selected = [d for d in selected if d in allowed]
+        if action != "ok":
+            day = int(action)
+            selected = sorted(set(selected) ^ {day}) if day in allowed else selected
+            await query.answer()
+            try:
+                await query.edit_message_reply_markup(reply_markup=keyboards.days_keyboard(allowed, selected))
+            except Exception:
+                logger.info("No se pudieron actualizar los botones de días")
+            return
+        if not selected:
+            await query.answer(texts.DAYS_EMPTY, show_alert=True)
+            return
+        await query.answer()
+        store.visit_weekdays = ",".join(str(d) for d in selected)
+        store.delivery_days_set_at = datetime.now(UTC)
+    await _remove_buttons(update)
+    await _reply(update, texts.days_saved(selected))
 
 
 async def handle_reject_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -267,10 +337,6 @@ def products_by_sku(products: list[Product]) -> dict[str, Product]:
     return {product.sku: product for product in products}
 
 
-def looks_like_sales(text: str) -> bool:
-    return "vend" in text.casefold()
-
-
 def parse_stock_correction(text: str) -> tuple[str, int] | None:
     parts = text.strip().split()
     if len(parts) < 2 or not parts[-1].isdigit():
@@ -308,8 +374,18 @@ async def get_pending(session: AsyncSession, store_id: int, kind: str) -> Pendin
     )
 
 
-async def replace_pending(session: AsyncSession, store_id: int, kind: str, payload: dict) -> None:
-    rows = (await session.scalars(select(PendingAction).where(PendingAction.store_id == store_id))).all()
+async def replace_pending(
+    session: AsyncSession, store_id: int, kind: str, payload: dict, ttl: timedelta = PENDING_TTL
+) -> None:
+    """Un borrador por tipo: el nuevo reemplaza al anterior del mismo tipo.
+
+    Así registrar una venta no borra el pedido que el tendero está armando.
+    """
+    rows = (
+        await session.scalars(
+            select(PendingAction).where(PendingAction.store_id == store_id, PendingAction.kind == kind)
+        )
+    ).all()
     for row in rows:
         await session.delete(row)
     session.add(
@@ -317,7 +393,7 @@ async def replace_pending(session: AsyncSession, store_id: int, kind: str, paylo
             store_id=store_id,
             kind=kind,
             payload=payload,
-            expires_at=datetime.now(UTC) + PENDING_TTL,
+            expires_at=datetime.now(UTC) + ttl,
         )
     )
 
@@ -388,22 +464,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         store = await require_ready_store(update, session)
         if store is None:
             return
-        store_id = store.id
-        products = await load_active_products(session, store.distributor_id)
-        catalog = products_as_catalog(products)
-        names = names_by_sku(products)
     audio_bytes = await _download_file(context, voice.file_id)
     try:
-        lines = await extract_sales(
-            catalog,
-            audio_bytes=audio_bytes,
-            audio_mime_type=voice.mime_type or "audio/ogg",
-        )
-    except GeminiExtractError as exc:
-        await _reply(update, exc.user_message)
+        transcript = await transcribe_audio(audio_bytes, voice.mime_type or "audio/ogg")
+    except Exception:
+        logger.warning("No se pudo transcribir el audio")
+        transcript = ""
+    if not transcript:
+        await _reply(update, texts.AI_FAIL)
         return
-    lines = match_sale_lines(lines, catalog)
-    await save_and_show_sales(update, store_id, lines, "voice", names)
+    await route_text(update, transcript, "voice")
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -429,7 +499,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     note = (message.caption or "").strip()
     try:
         lines = await extract_stock(catalog, image_bytes, "image/jpeg", note=note)
-    except GeminiExtractError as exc:
+    except ExtractError as exc:
         await _reply(update, exc.user_message)
         return
     lines = match_stock_lines(lines, catalog)
@@ -443,10 +513,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = (message.text or "").strip()
     if not text:
         return
+    await route_text(update, text, "text")
+    raise ApplicationHandlerStop
+
+
+async def route_text(update: Update, text: str, source: str) -> None:
+    """Texto del tendero (escrito o de un audio): corrige el conteo, cambia el pedido o registra ventas."""
     async with session_scope() as session:
         store = await require_ready_store(update, session)
         if store is None:
-            raise ApplicationHandlerStop
+            return
         store_id = store.id
         products = await load_active_products(session, store.distributor_id)
         catalog = products_as_catalog(products)
@@ -457,8 +533,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             name, quantity = correction
             match = best_product_match(name, catalog)
             if match is None:
-                await _reply(update, texts.GEMINI_FAIL)
-                raise ApplicationHandlerStop
+                await _reply(update, texts.AI_FAIL)
+                return
             sku = str(match["sku"])
             lines = apply_stock_correction(list(pending_stock.payload.get("lines") or []), sku, quantity)
             pending_stock.payload = {**pending_stock.payload, "lines": lines}
@@ -468,17 +544,64 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 texts.stock_summary(lines, names),
                 reply_markup=keyboards.confirm_stock_keyboard(),
             )
-            raise ApplicationHandlerStop
-        if not looks_like_sales(text):
             return
+        pending_order = await get_pending(session, store.id, KIND_ORDER)
+        order_payload = dict(pending_order.payload) if pending_order is not None else None
+
+    if order_payload is not None and await apply_order_message(update, store_id, text, products, order_payload):
+        return
+
+    # Todo texto va a Grok: el tendero no tiene que decir "vendí" para registrar una venta.
     try:
         lines = await extract_sales(catalog, transcript=text)
-    except GeminiExtractError as exc:
+    except ExtractError as exc:
         await _reply(update, exc.user_message)
-        raise ApplicationHandlerStop
+        return
     lines = match_sale_lines(lines, catalog)
-    await save_and_show_sales(update, store_id, lines, "text", names)
-    raise ApplicationHandlerStop
+    await save_and_show_sales(update, store_id, lines, source, names)
+
+
+async def apply_order_message(
+    update: Update, store_id: int, text: str, products: list[Product], payload: dict
+) -> bool:
+    """Si el mensaje pide cambios al pedido abierto, los aplica y muestra el pedido nuevo.
+
+    Devuelve False si el mensaje no era sobre el pedido (entonces se trata como ventas).
+    """
+    catalog = products_as_catalog(products)
+    by_id = {product.id: product for product in products}
+    current = to_order_lines(list(payload.get("lines") or []), by_id)
+    current_text = "\n".join(f"- sku={line.sku} | {line.name} | {line.cases} cajas" for line in current) or "(vacío)"
+    try:
+        changes = await extract_order_changes(catalog, text, current_text)
+    except ExtractError:
+        return False
+    if not changes:
+        return False
+    changes = match_order_changes(changes, catalog)
+    result = apply_order_changes(list(payload.get("lines") or []), changes, products_by_sku(products))
+    capped = cap_to_available(result.lines, by_id)
+    async with session_scope() as session:
+        pending = await get_pending(session, store_id, KIND_ORDER)
+        if pending is None:
+            await _reply(update, texts.NOTHING_PENDING)
+            return True
+        pending.payload = {**pending.payload, "lines": capped.lines}
+        pending.expires_at = datetime.now(UTC) + ORDER_PENDING_TTL
+    lines = to_order_lines(capped.lines, by_id)
+    await _reply(
+        update,
+        texts.order_draft(
+            lines,
+            order_total(lines),
+            date.fromisoformat(payload["delivery_date"]),
+            datetime.fromisoformat(payload["order_deadline"]),
+            result.not_found,
+            capped.not_found,
+        ),
+        reply_markup=keyboards.order_keyboard(),
+    )
+    return True
 
 
 async def handle_confirm_sales(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -609,23 +732,46 @@ async def handle_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Pedido sugerido para la próxima entrega. Queda como borrador que el tendero puede cambiar."""
     async with session_scope() as session:
         store = await require_ready_store(update, session)
         if store is None:
             return
         analysis = await load_store_analysis(session, store.id)
-        if analysis is None or not analysis.order_lines:
-            await _reply(update, texts.NO_ORDER)
+        if analysis is None:
+            await _reply(update, texts.NO_STORE)
             return
-        payload_lines = [
-            {"product_id": line.product_id, "cases": line.cases, "units": line.units, "reason": line.reason}
-            for line in analysis.order_lines
-        ]
-        await replace_pending(session, store.id, KIND_ORDER, {"lines": payload_lines})
+        by_id = {p.id: p for p in await load_active_products(session, store.distributor_id)}
+        capped = cap_to_available(
+            [
+                {"product_id": line.product_id, "cases": line.cases, "reason": line.reason}
+                for line in analysis.order_lines
+            ],
+            by_id,
+        )
+        payload_lines = capped.lines
+        await replace_pending(
+            session,
+            store.id,
+            KIND_ORDER,
+            {
+                "lines": payload_lines,
+                "delivery_date": analysis.next_delivery.isoformat(),
+                "order_deadline": analysis.order_deadline.isoformat(),
+            },
+            ttl=ORDER_PENDING_TTL,
+        )
+    lines = to_order_lines(payload_lines, by_id)
     await _reply(
         update,
-        texts.order_summary(analysis.order_lines, analysis.order_total),
-        reply_markup=keyboards.send_order_keyboard(),
+        texts.order_draft(
+            lines,
+            order_total(lines),
+            analysis.next_delivery,
+            analysis.order_deadline,
+            availability_notes=capped.not_found,
+        ),
+        reply_markup=keyboards.order_keyboard(),
     )
 
 
@@ -639,27 +785,61 @@ async def handle_send_order(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if pending is None:
             await _reply(update, texts.NOTHING_PENDING)
             return
-        valid_ids = {p.id for p in await load_active_products(session, store.distributor_id)}
-        order = SuggestedOrder(store_id=store.id, status="sent")
-        for line in pending.payload.get("lines") or []:
-            product_id = int(line.get("product_id") or 0)
-            cases = int(line.get("cases") or 0)
-            if product_id not in valid_ids or cases <= 0:
-                continue
-            order.items.append(
-                SuggestedOrderItem(
-                    product_id=product_id,
-                    cases=cases,
-                    units=int(line.get("units") or 0),
-                    reason=str(line.get("reason") or "")[:240],
+        draft_lines = list(pending.payload.get("lines") or [])
+        product_ids = [int(line.get("product_id") or 0) for line in draft_lines]
+        # FOR UPDATE: dos tiendas no pueden llevarse la misma última caja.
+        locked = (
+            await session.scalars(
+                select(Product)
+                .where(
+                    Product.id.in_(product_ids),
+                    Product.distributor_id == store.distributor_id,
+                    Product.active.is_(True),
                 )
+                .with_for_update()
             )
+        ).all()
+        products = {p.id: p for p in locked}
+        capped = cap_to_available(draft_lines, products)
+        lines = to_order_lines(capped.lines, products)
+        drafted_for = pending.payload.get("delivery_date")
         await session.delete(pending)
-        if not order.items:
+        if not lines:
             await _reply(update, texts.NO_ORDER)
             return
+        # Si pasó la hora límite mientras lo revisaba, el pedido va para la entrega siguiente.
+        schedule = delivery_schedule(store.visit_weekdays, store.lead_time_days, datetime.now(UTC))
+        missed_deadline = drafted_for is not None and drafted_for != schedule.next_delivery.isoformat()
+        order = SuggestedOrder(store_id=store.id, status="sent", delivery_date=schedule.next_delivery)
+        for line in lines:
+            order.items.append(
+                SuggestedOrderItem(
+                    product_id=line.product_id,
+                    cases=line.cases,
+                    units=line.units,
+                    reason=line.reason[:240],
+                )
+            )
+            product = products[line.product_id]
+            if product.available_units is not None:
+                product.available_units -= line.units
         session.add(order)
-    await _reply(update, texts.ORDER_SENT)
+    await _reply(update, texts.order_sent(schedule.next_delivery, missed_deadline, capped.not_found))
+
+
+async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _answer_callback(update)
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        pending = await get_pending(session, store.id, KIND_ORDER)
+        if pending is None:
+            await _reply(update, texts.NOTHING_PENDING)
+            return
+        await session.delete(pending)
+    await _remove_buttons(update)
+    await _reply(update, texts.ORDER_CANCELLED)
 
 
 async def handle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -688,6 +868,15 @@ async def handle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await _reply(update, texts.ORDER_RECEIVED)
 
 
+async def handle_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        products = sorted(await load_active_products(session, store.distributor_id), key=lambda p: p.name)
+    await _reply(update, texts.catalog_list(products))
+
+
 async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(update, texts.HELP)
 
@@ -701,7 +890,7 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.error("Error procesando update: %s", type(context.error).__name__, exc_info=context.error)
     if isinstance(update, Update):
         try:
-            await _reply(update, texts.GEMINI_FAIL)
+            await _reply(update, texts.AI_FAIL)
         except Exception:
             logger.warning("No se pudo avisar el error al chat")
 
@@ -721,17 +910,20 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("alertas", handle_alerts))
     application.add_handler(CommandHandler("pedido", handle_order))
     application.add_handler(CommandHandler("recibido", handle_received))
+    application.add_handler(CommandHandler("catalogo", handle_catalog))
     application.add_handler(CommandHandler("ayuda", handle_help))
     application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
     application.add_handler(CallbackQueryHandler(handle_consent, pattern=f"^{keyboards.ACCEPT_CONSENT}$"))
     application.add_handler(
         CallbackQueryHandler(handle_reject_consent, pattern=f"^{keyboards.REJECT_CONSENT}$")
     )
+    application.add_handler(CallbackQueryHandler(handle_days, pattern=keyboards.DAYS_PATTERN))
     application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=f"^{keyboards.CONFIRM_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=f"^{keyboards.CANCEL_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=f"^{keyboards.CONFIRM_STOCK}$"))
     application.add_handler(CallbackQueryHandler(handle_cancel_stock, pattern=f"^{keyboards.CANCEL_STOCK}$"))
     application.add_handler(CallbackQueryHandler(handle_send_order, pattern=f"^{keyboards.SEND_ORDER}$"))
+    application.add_handler(CallbackQueryHandler(handle_cancel_order, pattern=f"^{keyboards.CANCEL_ORDER}$"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(text_only, handle_link_code))

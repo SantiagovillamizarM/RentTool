@@ -15,7 +15,7 @@ Construir un bot de Telegram con IA que le lleve el inventario al tendero de bar
 3. **Contar inventario con foto:** el tendero manda una foto del estante. El bot estima cuántas unidades hay de cada producto, avisa que es una estimación y deja corregir antes de confirmar.
 4. **`/stock`:** muestra el inventario actual.
 5. **`/alertas`:** muestra qué productos se van a acabar y cuáles no se están vendiendo.
-6. **`/pedido`:** genera el pedido sugerido en cajas, con el motivo de cada producto y el total en pesos, y un botón para enviarlo al distribuidor.
+6. **`/pedido`:** genera el pedido sugerido en cajas para la próxima entrega, con el motivo de cada producto, el total en pesos y la hora límite. El tendero lo ajusta por texto o voz ("quita el arroz", "ponle 2 cajas más de coca") y lo envía con un botón. El día de la hora límite, si no ha pedido, el bot le manda un recordatorio automático.
 7. **`/recibido`:** confirma que llegó el pedido y suma la mercancía al inventario.
 8. **`/ayuda`:** ejemplos de uso.
 
@@ -30,7 +30,7 @@ Login con correo y contraseña. Debe mostrar:
 - **Stock actual** = último conteo + mercancía recibida − ventas desde ese conteo.
 - **Venta diaria** = promedio de ventas de los últimos 28 días.
 - **Días de cobertura** = stock actual ÷ venta diaria.
-- **Horizonte** = días hasta la próxima visita del distribuidor + días de entrega.
+- **Horizonte** = días desde hoy hasta la entrega siguiente a la próxima entrega alcanzable. Un pedido alcanza una entrega si se envía antes de las 6 p. m., con los días de anticipación de la tienda (mínimo 1). Los días de entrega los escoge el tendero entre los días de ruta del proveedor.
 - **Stock de seguridad** = 1,65 × desviación estándar de ventas diarias × √horizonte.
 - **Pedido** = venta diaria × horizonte + stock de seguridad − stock actual, redondeado hacia arriba a cajas completas.
 - **Clasificación ABC** por valor vendido: A hasta 80 %, B hasta 95 %, C el resto.
@@ -52,7 +52,7 @@ Login con correo y contraseña. Debe mostrar:
 - **Backend:** FastAPI.
 - **Bot:** python-telegram-bot.
 - **Base de datos:** PostgreSQL en Neon (gratis).
-- **IA:** Gemini API de Google (gratis), para voz y fotos.
+- **IA:** Grok (xAI) a través de la API del reto (`https://api.reto.pltk.mx/v1`), para voz, texto y fotos.
 - **Búsqueda en catálogo:** rapidfuzz.
 - **Panel:** plantillas Jinja2 + Chart.js.
 - **Pruebas:** pytest.
@@ -63,7 +63,7 @@ Un distribuidor, un usuario del panel, 3 tiendas, 30 productos típicos de tiend
 
 ## Qué se necesita conseguir
 - Bot creado en **@BotFather** (token).
-- API key de **Google AI Studio** (Gemini).
+- API key del reto para **Grok**.
 - Base de datos en **Neon**.
 - Repositorio en **GitHub**.
 - Cuenta en **Render**.
