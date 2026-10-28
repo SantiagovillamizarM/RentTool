@@ -9,7 +9,7 @@ import pytest
 from app.ai.grok_client import extract_order_changes
 from app.ai.matching import match_order_changes
 from app.bot import texts
-from app.bot.reminders import reminder_due
+from app.bot.reminders import idle_notice_due, reminder_due
 from app.inventory.engine import COLOMBIA_TZ, delivery_schedule
 from app.inventory.orders import ADDED_BY_YOU, apply_order_changes, order_total, to_order_lines
 from app.schemas import OrderChange
@@ -172,3 +172,30 @@ def test_reminder_text():
     text = texts.order_reminder(date(2026, 10, 8), datetime(2026, 10, 7, 18, tzinfo=COLOMBIA_TZ))
     assert text.startswith("⏰ El jueves 8/10 te llega mercancía.")
     assert "Escribe /pedido" in text
+
+
+def test_idle_notice_after_a_day_without_activity():
+    last = at(6, 10)
+    assert not idle_notice_due(last, None, at(7, 9, 59))  # aún no pasan 24 horas
+    assert idle_notice_due(last, None, at(7, 10))
+    assert not idle_notice_due(None, None, at(7, 10))  # chat sin actividad registrada
+
+
+def test_idle_notice_only_during_the_day():
+    last = at(5, 12)
+    assert not idle_notice_due(last, None, at(7, 8, 59))
+    assert idle_notice_due(last, None, at(7, 9))
+    assert idle_notice_due(last, None, at(7, 18, 59))
+    assert not idle_notice_due(last, None, at(7, 19))
+
+
+def test_idle_notice_once_per_idle_period():
+    last = at(5, 12)
+    assert not idle_notice_due(last, at(6, 12), at(7, 12))  # ya se avisó y no ha vuelto
+    # Volvió a usar el bot después del aviso: se puede avisar de nuevo tras otras 24 horas.
+    assert idle_notice_due(at(6, 13), at(6, 12), at(7, 13))
+
+
+def test_idle_notice_text():
+    text = texts.idle_notice("Tienda Doña Marta")
+    assert "La sesión de Tienda Doña Marta sigue abierta" in text

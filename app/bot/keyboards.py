@@ -1,4 +1,10 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 
 ACCEPT_CONSENT = "consent:accept"
 REJECT_CONSENT = "consent:reject"
@@ -8,6 +14,21 @@ CONFIRM_STOCK = "stock:confirm"
 CANCEL_STOCK = "stock:cancel"
 SEND_ORDER = "order:send"
 CANCEL_ORDER = "order:cancel"
+CONFIRM_LOGOUT = "logout:confirm"
+KEEP_SESSION = "logout:keep"
+
+
+def share_phone_keyboard() -> ReplyKeyboardMarkup:
+    """Botón de Telegram que manda el número verificado de la cuenta (no se puede escribir otro)."""
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📱 Compartir mi número", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def remove_keyboard() -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
 
 def consent_keyboard() -> InlineKeyboardMarkup:
@@ -38,6 +59,17 @@ def confirm_stock_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("✅ Confirmar", callback_data=CONFIRM_STOCK),
                 InlineKeyboardButton("❌ Cancelar", callback_data=CANCEL_STOCK),
+            ]
+        ]
+    )
+
+
+def logout_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🚪 Cerrar sesión", callback_data=CONFIRM_LOGOUT),
+                InlineKeyboardButton("👍 Sigo aquí", callback_data=KEEP_SESSION),
             ]
         ]
     )

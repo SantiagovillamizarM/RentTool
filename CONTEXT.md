@@ -10,7 +10,7 @@ Construir un bot de Telegram con IA que le lleve el inventario al tendero de bar
 **De dónde salen los datos:** las ventas que registra el tendero y el catálogo del distribuidor.
 
 ## Qué debe hacer el bot (tendero)
-1. **Vincular la tienda:** con `/start` el tendero ingresa el código de su tienda y acepta el tratamiento de datos personales (Ley 1581 de 2012). Sin aceptar, el bot no funciona.
+1. **Vincular la tienda:** con `/start` el tendero toca 📱 Compartir mi número (Telegram manda su número verificado; debe ser el celular que el distribuidor registró para la tienda) y acepta el tratamiento de datos personales (Ley 1581 de 2012). Sin aceptar, el bot no funciona.
 2. **Registrar ventas por voz o texto:** el tendero dice o escribe "vendí 2 Coca-Cola litro y un pan tajado". El bot identifica productos y cantidades, los busca en el catálogo, muestra un resumen y solo guarda si el tendero pulsa ✅ Confirmar.
 3. **Contar inventario con foto:** el tendero manda una foto del estante. El bot estima cuántas unidades hay de cada producto, avisa que es una estimación y deja corregir antes de confirmar.
 4. **`/stock`:** muestra el inventario actual.

@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app.inventory.engine import ProductAnalysis, StoreAnalysis
+from app.phones import format_phone, normalize_phone
 from app.web.aggregations import aggregate_demand, count_stores_at_risk, product_status, top_risk_products
 from app.web.auth import LoginRateLimiter
 from app.web.formatting import cop, coverage, daily_series, qty
@@ -236,3 +237,39 @@ async def test_live_version_requires_login():
         response = await client.get("/panel/actualizacion")
     assert response.status_code == 303
     assert response.headers["location"] == "/panel/login"
+
+
+# --- Celular del tendero -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("3001234567", "573001234567"),
+        ("+57 300 123 4567", "573001234567"),
+        ("573001234567", "573001234567"),  # así lo manda Telegram
+        ("(300) 123-4567", "573001234567"),
+        ("+1 415 555 0100", "14155550100"),
+        ("12345", None),
+        ("", None),
+    ],
+)
+def test_normalize_phone(raw, expected):
+    assert normalize_phone(raw) == expected
+
+
+def test_format_phone():
+    assert format_phone("573001234567") == "+57 300 123 4567"
+    assert format_phone("14155550100") == "+14155550100"
+    assert format_phone(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_store_phone_requires_login():
+    from app.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/panel/tiendas/1/celular", data={"phone": "3001234567"})
+        assert response.status_code == 303
+        assert response.headers["location"] == "/panel/login"

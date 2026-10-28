@@ -59,13 +59,13 @@ PRODUCTS = [
     ("ATU-VANC-170", "Atún Van Camps 170 g", "atun,atún,van camps,lata de atun", "170 g", 24, 6900),
 ]
 
-# (nombre, dueño, código de vinculación, días de ruta del proveedor, días de entrega iniciales,
+# (nombre, dueño, días de ruta del proveedor, días de entrega iniciales,
 #  días de anticipación para pedir). Los días de entrega iniciales se usan hasta que el tendero
 #  escoja los suyos en el bot.
 STORES = [
-    ("Tienda Doña Marta", "Marta Gómez", "MARTA01", "0,2,4", "0,4", 1),
-    ("Mini Market El Parque", "Carlos Ruiz", "PARQUE02", "1,3,5", "1,5", 1),
-    ("La Esquina de Luz", "Luz Helena Díaz", "LUZ03", "0,2,4", "0,2", 2),
+    ("Tienda Doña Marta", "Marta Gómez", "0,2,4", "0,4", 1),
+    ("Mini Market El Parque", "Carlos Ruiz", "1,3,5", "1,5", 1),
+    ("La Esquina de Luz", "Luz Helena Díaz", "0,2,4", "0,2", 2),
 ]
 
 
@@ -119,13 +119,13 @@ async def seed(session: AsyncSession) -> None:
             )
         )
 
-    for name, owner_name, link_code, route_weekdays, visit_weekdays, lead_time_days in STORES:
+    # Sin celular: el distribuidor lo registra en el panel (Tiendas) para que el tendero pueda entrar.
+    for name, owner_name, route_weekdays, visit_weekdays, lead_time_days in STORES:
         session.add(
             Store(
                 distributor_id=distributor.id,
                 name=name,
                 owner_name=owner_name,
-                link_code=link_code,
                 route_weekdays=route_weekdays,
                 visit_weekdays=visit_weekdays,
                 lead_time_days=lead_time_days,

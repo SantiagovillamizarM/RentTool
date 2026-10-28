@@ -15,6 +15,23 @@
 
 <section class="card">
   <div class="card-head">
+    <h2>Acceso al bot</h2>
+    {% if store.telegram_chat_id %}<span class="badge badge-ok">Sesión abierta</span>
+    {% else %}<span class="badge badge-muted">Sin sesión</span>{% endif %}
+  </div>
+  <p class="muted small">El tendero entra al bot de Telegram tocando <strong>📱 Compartir mi número</strong>. Solo entra si su número es el que registres aquí.</p>
+  {% if phone_message %}<p class="notice">{{ phone_message }}</p>{% endif %}
+  {% if phone_error %}<p class="alert">{{ phone_error }}</p>{% endif %}
+  <form method="post" action="/panel/tiendas/{{ store.id }}/celular" class="form-grid">
+    <label>Celular del dueño<input name="phone" value="{{ store.owner_phone|phone }}" inputmode="tel" maxlength="24" placeholder="+57 300 123 4567"></label>
+    <div class="actions" style="align-items: flex-end">
+      <button type="submit" class="primary">Guardar celular <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head">
     <h2>Unidades vendidas por día</h2>
     <span class="muted">Últimos 28 días</span>
   </div>

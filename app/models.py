@@ -61,7 +61,8 @@ class Store(Base):
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     owner_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    link_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    # Celular del dueño (solo dígitos, con indicativo). Entra al bot compartiendo este número.
+    owner_phone: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     # Días en que el proveedor pasa por la zona de la tienda (los define el distribuidor).
     route_weekdays: Mapped[str] = mapped_column(String(32), nullable=False, default="0,2,4")
@@ -72,6 +73,9 @@ class Store(Base):
     delivery_days_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Entrega para la que ya se mandó el recordatorio de pedido (evita repetirlo).
     last_reminder_for: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Último mensaje o botón del chat vinculado, y cuándo se le avisó que la sesión sigue abierta.
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idle_notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="stores")
     sales: Mapped[list["Sale"]] = relationship(back_populates="store")
@@ -79,6 +83,23 @@ class Store(Base):
     receipts: Mapped[list["Receipt"]] = relationship(back_populates="store")
     suggested_orders: Mapped[list["SuggestedOrder"]] = relationship(back_populates="store")
     pending_actions: Mapped[list["PendingAction"]] = relationship(back_populates="store")
+
+
+class StoreConsent(Base):
+    """Autorización de datos (Ley 1581) que dio una cuenta de Telegram para una tienda.
+
+    Se conserva al cerrar sesión: si la misma cuenta vuelve a entrar no se le pregunta otra vez.
+    """
+
+    __tablename__ = "store_consents"
+    __table_args__ = (UniqueConstraint("store_id", "telegram_chat_id", name="uq_store_consents_store_chat"),)
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    telegram_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Product(Base):

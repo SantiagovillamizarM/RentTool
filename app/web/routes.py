@@ -21,6 +21,7 @@ from app.inventory.engine import (
 )
 from app.models import Product, Receipt, Sale, StockCount, Store, SuggestedOrder, SuggestedOrderItem
 from app.inventory.orders import cap_to_available, order_total, to_order_lines
+from app.phones import format_phone, normalize_phone
 from app.web import aggregations, catalog, formatting
 from app.web.auth import (
     authenticate,
@@ -45,6 +46,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 templates.env.globals["static_version"] = int(max(f.stat().st_mtime for f in STATIC_DIR.iterdir()))
 templates.env.filters["day"] = day_label
 templates.env.filters["deadline"] = deadline_label
+templates.env.filters["phone"] = format_phone
 
 router = APIRouter(prefix="/panel")
 
@@ -243,8 +245,50 @@ async def store_detail(
         "products": sorted(analysis.products, key=lambda p: (p.abc_class, p.name)),
         "chart": chart,
         "sent_orders": await _sent_orders(session, distributor_id, store.id),
+        "phone_message": PHONE_MESSAGES.get(request.query_params.get("celular", "")),
+        "phone_error": PHONE_ERRORS.get(request.query_params.get("celular", "")),
     }
     return templates.TemplateResponse(request, "store_detail.html", context)
+
+
+PHONE_MESSAGES = {
+    "ok": "Celular guardado. El tendero ya puede entrar al bot compartiendo su número.",
+    "borrado": "Celular borrado. Nadie puede entrar al bot con esta tienda hasta que registres uno.",
+}
+PHONE_ERRORS = {
+    "invalido": "Ese número no es válido. Escríbelo con indicativo, por ejemplo +57 300 123 4567.",
+    "repetido": "Ese número ya está registrado en otra tienda.",
+}
+
+
+@router.post("/tiendas/{store_id}/celular")
+async def store_phone(
+    store_id: int,
+    phone: str = Form(""),
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    """Celular del dueño: con él entra al bot (botón 📱 Compartir mi número)."""
+    store = await session.get(Store, store_id)
+    if store is None or store.distributor_id != distributor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    url = f"/panel/tiendas/{store.id}?celular="
+    clean = normalize_phone(phone) if phone.strip() else None
+    if phone.strip() and clean is None:
+        return RedirectResponse(url + "invalido", status_code=status.HTTP_303_SEE_OTHER)
+    if clean is not None:
+        taken = await session.scalar(select(Store.id).where(Store.owner_phone == clean, Store.id != store.id))
+        if taken is not None:
+            return RedirectResponse(url + "repetido", status_code=status.HTTP_303_SEE_OTHER)
+    if clean != store.owner_phone:
+        # Cambió el dueño del acceso: se cierra la sesión que estuviera abierta con el número anterior.
+        store.owner_phone = clean
+        store.telegram_chat_id = None
+        store.consent_at = None
+        store.last_activity_at = None
+        store.idle_notice_sent_at = None
+        await session.commit()
+    return RedirectResponse(url + ("ok" if clean else "borrado"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/demanda", response_class=HTMLResponse)

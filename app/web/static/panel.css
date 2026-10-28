@@ -337,7 +337,6 @@ button.primary:hover,
 .onboarding { display: flex; gap: 1rem; align-items: flex-start; margin: 0 0 1.25rem; border-color: rgba(246, 190, 69, 0.3); }
 .onboarding .kpi-icon { margin: 0; flex: none; }
 .onboarding p { margin: 0.35rem 0 0; }
-.code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--amber); letter-spacing: 0.04em; }
 
 /* ---------------------------------------------------------------- KPIs */
 

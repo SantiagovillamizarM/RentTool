@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from time import monotonic
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import Update
 from telegram.ext import (
@@ -38,9 +38,11 @@ from app.models import (
     Sale,
     StockCount,
     Store,
+    StoreConsent,
     SuggestedOrder,
     SuggestedOrderItem,
 )
+from app.phones import normalize_phone
 from app.schemas import SaleLine, StockLine
 
 RATE_LIMIT_MAX = 20
@@ -96,6 +98,10 @@ async def _reply(update: Update, text: str, reply_markup=None) -> None:
     await message.reply_text(text, reply_markup=reply_markup)
 
 
+async def _ask_login(update: Update, text: str = texts.ASK_LOGIN) -> None:
+    await _reply(update, text, reply_markup=keyboards.share_phone_keyboard())
+
+
 async def check_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = _chat_id(update)
     if chat_id is None:
@@ -111,22 +117,27 @@ async def check_rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def require_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Mientras el chat no tenga tienda, solo se aceptan /start y el código (texto)."""
+    """Mientras el chat no tenga tienda, solo se aceptan /start y el número compartido.
+
+    Con tienda vinculada, cada mensaje o botón cuenta como actividad (aviso de sesión abierta).
+    """
     chat_id = _chat_id(update)
     if chat_id is None:
         return
     async with session_scope() as session:
-        if await get_store_by_chat(session, chat_id) is not None:
+        store = await get_store_by_chat(session, chat_id)
+        if store is not None:
+            store.last_activity_at = datetime.now(UTC)
             return
     message = update.message
-    if message is not None and message.text:
-        is_command = message.text.startswith("/")
-        if not is_command or message.text.split()[0].split("@")[0].lower() == "/start":
-            return
+    if message is not None and message.contact is not None:
+        return
+    if message is not None and message.text and message.text.split()[0].split("@")[0].lower() == "/start":
+        return
     query = update.callback_query
     if query is not None:
         await query.answer()
-    await _reply(update, texts.ASK_STORE)
+    await _ask_login(update)
     raise ApplicationHandlerStop
 
 
@@ -140,7 +151,7 @@ async def require_ready_store(update: Update, session: AsyncSession) -> Store | 
         return None
     store = await get_store_by_chat(session, chat_id)
     if store is None:
-        await _reply(update, texts.NO_STORE)
+        await _ask_login(update)
         return None
     if store.consent_at is None:
         await _reply(update, texts.NEED_CONSENT, reply_markup=keyboards.consent_keyboard())
@@ -169,7 +180,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     async with session_scope() as session:
         store = await get_store_by_chat(session, chat_id)
         if store is None:
-            await _reply(update, texts.ASK_CODE)
+            await _ask_login(update, texts.START_UNLINKED)
             return
         # Siempre se saluda primero y luego se retoma el paso que falte.
         if store.consent_at is None:
@@ -183,33 +194,56 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _reply(update, texts.START_LINKED)
 
 
-async def handle_link_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Entrada con el botón 📱: Telegram manda el número verificado de la cuenta que escribe."""
     chat_id = _chat_id(update)
     message = update.effective_message
-    if chat_id is None or message is None:
+    user = update.effective_user
+    if chat_id is None or message is None or message.contact is None:
         return
-    code = (message.text or "").strip()
-    if not code:
+    # Con el botón solo se puede mandar el propio número; un contacto reenviado trae otro user_id.
+    if user is None or message.contact.user_id != user.id:
+        await _ask_login(update, texts.CONTACT_NOT_YOURS)
         return
+    phone = normalize_phone(message.contact.phone_number)
+    previous_chat_id = None
     async with session_scope() as session:
         existing = await get_store_by_chat(session, chat_id)
         if existing is not None:
-            if existing.consent_at is None:
-                await _reply(update, texts.NEED_CONSENT, reply_markup=keyboards.consent_keyboard())
-                raise ApplicationHandlerStop
+            await _reply(update, texts.already_logged_in(existing.name), reply_markup=keyboards.remove_keyboard())
             return
-        store = await session.scalar(
-            select(Store).where(func.lower(Store.link_code) == code.casefold())
-        )
+        store = await session.scalar(select(Store).where(Store.owner_phone == phone)) if phone else None
         if store is None:
-            await _reply(update, texts.UNKNOWN_CODE)
-            raise ApplicationHandlerStop
+            await _ask_login(update, texts.PHONE_NOT_REGISTERED)
+            return
         if store.telegram_chat_id is not None:
-            await _reply(update, texts.ALREADY_LINKED)
-            raise ApplicationHandlerStop
+            # El dueño del número verificado manda: la sesión pasa a esta cuenta.
+            previous_chat_id = store.telegram_chat_id
         store.telegram_chat_id = chat_id
-        await _reply(update, texts.CONSENT_NOTICE, reply_markup=keyboards.consent_keyboard())
-        raise ApplicationHandlerStop
+        store.consent_at = await get_consent(session, store.id, chat_id)
+        store.last_activity_at = datetime.now(UTC)
+        store.idle_notice_sent_at = None
+        await _reply(update, texts.PHONE_VERIFIED, reply_markup=keyboards.remove_keyboard())
+        if store.consent_at is None:
+            await _reply(update, texts.CONSENT_NOTICE, reply_markup=keyboards.consent_keyboard())
+        else:
+            # Esta misma cuenta ya había aceptado para esta tienda: entra directo.
+            await _reply(update, texts.welcome_back(store.owner_name, store.name))
+            if store.delivery_days_set_at is None:
+                await ask_days(update, store)
+    if previous_chat_id is not None and context is not None:
+        try:
+            await context.bot.send_message(previous_chat_id, texts.SESSION_MOVED)
+        except Exception:
+            logger.info("No se pudo avisar al chat anterior que se cerró la sesión")
+
+
+async def get_consent(session: AsyncSession, store_id: int, chat_id: int) -> datetime | None:
+    return await session.scalar(
+        select(StoreConsent.accepted_at).where(
+            StoreConsent.store_id == store_id, StoreConsent.telegram_chat_id == chat_id
+        )
+    )
 
 
 async def handle_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -223,10 +257,12 @@ async def handle_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     async with session_scope() as session:
         store = await get_store_by_chat(session, chat_id)
         if store is None:
-            await _reply(update, texts.NEED_LINK)
+            await _ask_login(update)
             return
         if store.consent_at is None:
             store.consent_at = datetime.now(UTC)
+            if await get_consent(session, store.id, chat_id) is None:
+                session.add(StoreConsent(store_id=store.id, telegram_chat_id=chat_id, accepted_at=store.consent_at))
         await _reply(update, texts.WELCOME.format(owner=store.owner_name))
         if store.delivery_days_set_at is None:
             await ask_days(update, store)
@@ -244,7 +280,7 @@ async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         store = await get_store_by_chat(session, chat_id)
         if store is None or store.consent_at is None:
             await query.answer()
-            await _reply(update, texts.NEED_LINK)
+            await _ask_login(update)
             return
         if store.delivery_days_set_at is not None:
             # Botón viejo: los días ya quedaron escogidos.
@@ -273,7 +309,7 @@ async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def handle_reject_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """No acepta: se desvincula el chat y vuelve al paso del código."""
+    """No acepta: se desvincula el chat y vuelve al paso de compartir el número."""
     query = update.callback_query
     if query is None:
         return
@@ -284,7 +320,7 @@ async def handle_reject_consent(update: Update, context: ContextTypes.DEFAULT_TY
     async with session_scope() as session:
         store = await get_store_by_chat(session, chat_id)
         if store is None:
-            await _reply(update, texts.NEED_LINK)
+            await _ask_login(update)
             return
         if store.consent_at is not None:
             # Botón viejo de un aviso ya aceptado: no se desvincula por accidente.
@@ -292,7 +328,49 @@ async def handle_reject_consent(update: Update, context: ContextTypes.DEFAULT_TY
             return
         store.telegram_chat_id = None
     await _remove_buttons(update)
-    await _reply(update, texts.CONSENT_REJECTED)
+    await _ask_login(update, texts.CONSENT_REJECTED)
+
+
+async def handle_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = _chat_id(update)
+    if chat_id is None:
+        return
+    async with session_scope() as session:
+        store = await get_store_by_chat(session, chat_id)
+        if store is None:
+            await _ask_login(update)
+            return
+        name = store.name
+    await _reply(update, texts.logout_question(name), reply_markup=keyboards.logout_keyboard())
+
+
+async def handle_confirm_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Desvincula el chat. La autorización de datos queda guardada para esta cuenta (StoreConsent)."""
+    await _answer_callback(update)
+    chat_id = _chat_id(update)
+    if chat_id is None:
+        return
+    async with session_scope() as session:
+        store = await get_store_by_chat(session, chat_id)
+        if store is None:
+            await _ask_login(update)
+            return
+        pending = (await session.scalars(select(PendingAction).where(PendingAction.store_id == store.id))).all()
+        for row in pending:
+            await session.delete(row)
+        store.telegram_chat_id = None
+        store.consent_at = None
+        store.last_activity_at = None
+        store.idle_notice_sent_at = None
+    await _remove_buttons(update)
+    await _ask_login(update, texts.LOGGED_OUT)
+
+
+async def handle_keep_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # La actividad ya quedó registrada en require_link: solo se confirma.
+    await _answer_callback(update)
+    await _remove_buttons(update)
+    await _reply(update, texts.SESSION_KEPT)
 
 
 async def _remove_buttons(update: Update) -> None:
@@ -726,7 +804,7 @@ async def handle_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
         analysis = await load_store_analysis(session, store.id)
     if analysis is None:
-        await _reply(update, texts.NO_STORE)
+        await _ask_login(update)
         return
     await _reply(update, texts.alerts_list(analysis.at_risk, analysis.stagnant))
 
@@ -739,7 +817,7 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
         analysis = await load_store_analysis(session, store.id)
         if analysis is None:
-            await _reply(update, texts.NO_STORE)
+            await _ask_login(update)
             return
         by_id = {p.id: p for p in await load_active_products(session, store.distributor_id)}
         capped = cap_to_available(
@@ -901,10 +979,10 @@ def register_handlers(application: Application) -> None:
     # Grupo -2: rate limit antes que todo (lanza ApplicationHandlerStop si se pasa).
     application.add_handler(TypeHandler(Update, check_rate_limit), group=-2)
 
-    # Grupo -1: sin tienda vinculada solo pasan /start y el código.
+    # Grupo -1: sin tienda vinculada solo pasan /start y el número compartido.
     application.add_handler(TypeHandler(Update, require_link), group=-1)
 
-    # Grupo 0: comandos, botones, voz, foto y código de vinculación.
+    # Grupo 0: comandos, botones, voz, foto y número para entrar.
     application.add_handler(CommandHandler("start", handle_start))
     application.add_handler(CommandHandler("stock", handle_stock))
     application.add_handler(CommandHandler("alertas", handle_alerts))
@@ -912,12 +990,15 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("recibido", handle_received))
     application.add_handler(CommandHandler("catalogo", handle_catalog))
     application.add_handler(CommandHandler("ayuda", handle_help))
+    application.add_handler(CommandHandler("salir", handle_logout))
     application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
     application.add_handler(CallbackQueryHandler(handle_consent, pattern=f"^{keyboards.ACCEPT_CONSENT}$"))
     application.add_handler(
         CallbackQueryHandler(handle_reject_consent, pattern=f"^{keyboards.REJECT_CONSENT}$")
     )
     application.add_handler(CallbackQueryHandler(handle_days, pattern=keyboards.DAYS_PATTERN))
+    application.add_handler(CallbackQueryHandler(handle_confirm_logout, pattern=f"^{keyboards.CONFIRM_LOGOUT}$"))
+    application.add_handler(CallbackQueryHandler(handle_keep_session, pattern=f"^{keyboards.KEEP_SESSION}$"))
     application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=f"^{keyboards.CONFIRM_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=f"^{keyboards.CANCEL_SALES}$"))
     application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=f"^{keyboards.CONFIRM_STOCK}$"))
@@ -926,7 +1007,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(handle_cancel_order, pattern=f"^{keyboards.CANCEL_ORDER}$"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(MessageHandler(text_only, handle_link_code))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
     # Grupo 1: texto de una tienda ya vinculada (ventas o corrección de conteo).
     application.add_handler(MessageHandler(text_only, handle_text), group=1)

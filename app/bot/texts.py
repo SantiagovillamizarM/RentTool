@@ -6,12 +6,20 @@ RATE_LIMITED = "Espera un momentico. Máximo 20 mensajes por minuto."
 PHOTO_TOO_BIG = "La foto pesa mucho. Máximo 10 MB."
 VOICE_TOO_LONG = "El audio es muy largo. Máximo 2 minutos."
 NEED_CONSENT = "Para seguir, primero responde si aceptas el uso de tus datos."
-ASK_STORE = "Antes de todo, ¿de qué tienda nos estás hablando? (Proporciona el código de tu tienda)"
-NEED_LINK = ASK_STORE
-UNKNOWN_CODE = "Código incorrecto o no registrado."
-ALREADY_LINKED = "Esa tienda ya está vinculada a otro chat. Pídele ayuda a tu distribuidor."
-STORE_BUSY = "Ese chat ya está vinculado a otra tienda."
-NO_STORE = ASK_STORE
+ASK_LOGIN = (
+    "Para entrar, toca el botón 📱 Compartir mi número que aparece abajo.\n"
+    "Así compruebo que eres el dueño de la tienda, sin códigos ni contraseñas."
+)
+CONTACT_NOT_YOURS = "Ese no es tu número. Toca el botón 📱 Compartir mi número para mandar el tuyo."
+PHONE_NOT_REGISTERED = (
+    "Tu número no está registrado en ninguna tienda.\n"
+    "Pídele a tu distribuidor que lo registre y vuelve a tocar 📱 Compartir mi número."
+)
+PHONE_VERIFIED = "✅ Número verificado."
+SESSION_MOVED = (
+    "🔒 Se abrió la sesión de tu tienda en otra cuenta de Telegram con tu número, "
+    "así que la cerré en este chat."
+)
 NOTHING_PENDING = "No hay nada por confirmar."
 CANCELLED = "Listo, no guardé nada."
 SAVED_SALES = "Quedó registrado."
@@ -41,6 +49,7 @@ HELP = (
     "/pedido – qué pedirle al distribuidor (puedes cambiarlo antes de enviarlo)\n"
     "/recibido – avisa que llegó el pedido\n"
     "/catalogo – lo que tiene tu proveedor y sus precios\n"
+    "/salir – cerrar la sesión de tu tienda en este chat\n"
     "/ayuda – ver este mensaje"
 )
 UNKNOWN = (
@@ -60,7 +69,7 @@ CONSENT_NOTICE = (
 )
 CONSENT_REJECTED = (
     "Entendido, no guardamos nada. Sin tu permiso no podemos ayudarte con la tienda.\n\n"
-    "Si cambias de opinión, envíame otra vez el código de tu tienda."
+    "Si cambias de opinión, toca otra vez 📱 Compartir mi número."
 )
 CONSENT_ALREADY = "Ya habías aceptado antes. Pon /ayuda para ver lo que puedo hacer."
 INTRO = (
@@ -75,7 +84,7 @@ QUICK_START = (
     "📦 Escribe /pedido y te digo qué pedirle al distribuidor.\n\n"
     "Antes de guardar algo siempre te pregunto. Escribe /ayuda para ver más."
 )
-ASK_CODE = INTRO + "\n\n" + ASK_STORE
+START_UNLINKED = INTRO + "\n\n" + ASK_LOGIN
 START_LINKED = INTRO + "\n\n" + QUICK_START
 
 
@@ -264,6 +273,41 @@ def new_product(name: str, price, units_per_case: int) -> str:
     return (
         f"🆕 Tu proveedor tiene un producto nuevo: {name}, a {cop(price)} la unidad "
         f"(caja de {units_per_case}). Ya lo puedes pedir con /pedido."
+    )
+
+
+LOGGED_OUT = (
+    "🚪 Listo, cerraste la sesión. Nadie podrá ver tu tienda desde este chat.\n\n"
+    "Tus ventas y tu inventario siguen guardados. Para volver a entrar, "
+    "toca 📱 Compartir mi número."
+)
+SESSION_KEPT = "👍 Perfecto, tu sesión sigue abierta."
+
+
+def already_logged_in(store_name: str) -> str:
+    return f"Ya estás dentro de {store_name}. Escribe /ayuda para ver lo que puedo hacer."
+
+
+def welcome_back(owner: str, store_name: str) -> str:
+    return (
+        f"👋 Hola de nuevo, {owner}. Ya entraste a {store_name}.\n\n"
+        "Escribe /ayuda si quieres ver lo que puedo hacer."
+    )
+
+
+def logout_question(store_name: str) -> str:
+    return (
+        f"¿Quieres cerrar la sesión de {store_name} en este chat?\n\n"
+        "Tus datos no se borran. Para volver a entrar solo tienes que compartir tu número."
+    )
+
+
+def idle_notice(store_name: str) -> str:
+    return (
+        f"👋 Hola, hace rato no te veo por aquí.\n\n"
+        f"La sesión de {store_name} sigue abierta en este chat. "
+        "Si ya no lo estás usando o alguien más tiene este teléfono, ciérrala para proteger "
+        "la información de tu tienda."
     )
 
 

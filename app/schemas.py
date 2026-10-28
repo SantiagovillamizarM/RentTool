@@ -26,7 +26,7 @@ class StoreOut(BaseModel):
     distributor_id: int
     name: str
     owner_name: str
-    link_code: str
+    owner_phone: str | None
     telegram_chat_id: int | None
     visit_weekdays: str
     lead_time_days: int

@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from telegram import Update
@@ -7,7 +9,7 @@ from telegram.ext import ApplicationHandlerStop
 from app.bot import handlers, texts
 
 
-def message_update(text: str | None = None, voice: bool = False) -> Update:
+def message_update(text: str | None = None, voice: bool = False, contact: dict | None = None) -> Update:
     message = {
         "message_id": 1,
         "date": 0,
@@ -20,6 +22,8 @@ def message_update(text: str | None = None, voice: bool = False) -> Update:
             message["entities"] = [{"type": "bot_command", "offset": 0, "length": len(text.split()[0])}]
     if voice:
         message["voice"] = {"file_id": "v", "file_unique_id": "v", "duration": 3}
+    if contact is not None:
+        message["contact"] = {"first_name": "Tendero", **contact}
     return Update.de_json({"update_id": 1, "message": message}, None)
 
 
@@ -45,9 +49,13 @@ def unlinked(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("text", ["/start", "/start@CO_Tendero_Bot", "MARTA01", "cualquier cosa"])
-async def test_unlinked_chat_lets_start_and_codes_through(unlinked, text):
-    await handlers.require_link(message_update(text), None)
+@pytest.mark.parametrize("update_factory", [
+    lambda: message_update("/start"),
+    lambda: message_update("/start@CO_Tendero_Bot"),
+    lambda: message_update(contact={"phone_number": "573001234567", "user_id": 555}),
+])
+async def test_unlinked_chat_lets_start_and_phone_through(unlinked, update_factory):
+    await handlers.require_link(update_factory(), None)
     assert unlinked == []
 
 
@@ -55,17 +63,18 @@ async def test_unlinked_chat_lets_start_and_codes_through(unlinked, text):
 @pytest.mark.parametrize("update_factory", [
     lambda: message_update("/ayuda"),
     lambda: message_update("/stock"),
+    lambda: message_update("MARTA01"),
     lambda: message_update(voice=True),
 ])
-async def test_unlinked_chat_is_asked_for_store_code(unlinked, update_factory):
+async def test_unlinked_chat_is_asked_to_share_phone(unlinked, update_factory):
     with pytest.raises(ApplicationHandlerStop):
         await handlers.require_link(update_factory(), None)
-    assert unlinked == [texts.ASK_STORE]
+    assert unlinked == [texts.ASK_LOGIN]
 
 
 def test_texts():
-    assert texts.UNKNOWN_CODE == "Código incorrecto o no registrado."
-    assert texts.ASK_CODE.endswith("(Proporciona el código de tu tienda)")
+    assert texts.START_UNLINKED.endswith(texts.ASK_LOGIN)
+    assert "📱 Compartir mi número" in texts.ASK_LOGIN
 
 
 class FakeQuery:
@@ -241,3 +250,169 @@ async def test_start_greets_before_asking_consent(monkeypatch):
     replies = patch_store(monkeypatch, store)
     await handlers.handle_start(callback_update(), None)
     assert replies == [texts.INTRO, texts.CONSENT_NOTICE]
+
+
+# --- Cerrar sesión -----------------------------------------------------------
+
+
+class FakeSession:
+    def __init__(self, rows):
+        self.rows = rows
+        self.deleted: list = []
+
+    async def scalars(self, statement):
+        return SimpleNamespace(all=lambda: self.rows)
+
+    async def delete(self, row):
+        self.deleted.append(row)
+
+
+@pytest.mark.asyncio
+async def test_linked_chat_activity_is_recorded(monkeypatch):
+    store = days_store(last_activity_at=None)
+    replies = patch_store(monkeypatch, store)
+    await handlers.require_link(message_update("/stock"), None)
+    assert store.last_activity_at is not None
+    assert replies == []
+
+
+@pytest.mark.asyncio
+async def test_salir_asks_before_logging_out(monkeypatch):
+    store = days_store(name="Tienda Doña Marta", telegram_chat_id=555)
+    replies = patch_store(monkeypatch, store)
+    await handlers.handle_logout(message_update("/salir"), None)
+    assert replies == [texts.logout_question("Tienda Doña Marta")]
+    assert store.telegram_chat_id == 555
+
+
+@pytest.mark.asyncio
+async def test_confirm_logout_unlinks_and_clears_drafts(monkeypatch):
+    store = days_store(id=7, telegram_chat_id=555, last_activity_at=datetime.now(UTC), idle_notice_sent_at=None)
+    replies = patch_store(monkeypatch, store)
+    session = FakeSession(rows=["borrador de pedido"])
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield session
+
+    monkeypatch.setattr(handlers, "session_scope", fake_scope)
+    await handlers.handle_confirm_logout(callback_update(), None)
+    assert store.telegram_chat_id is None
+    # Quien entre después con el código tiene que aceptar el tratamiento de datos otra vez.
+    assert store.consent_at is None
+    assert store.last_activity_at is None
+    assert session.deleted == ["borrador de pedido"]
+    assert replies == [texts.LOGGED_OUT]
+
+
+@pytest.mark.asyncio
+async def test_keep_session_does_not_unlink(monkeypatch):
+    store = days_store(telegram_chat_id=555)
+    replies = patch_store(monkeypatch, store)
+    await handlers.handle_keep_session(callback_update(), None)
+    assert store.telegram_chat_id == 555
+    assert replies == [texts.SESSION_KEPT]
+
+
+def test_help_mentions_salir():
+    assert "/salir" in texts.HELP
+
+
+# --- Entrar compartiendo el número -------------------------------------------
+
+
+def login_with_phone(monkeypatch, store, consent=None):
+    """Chat sin tienda que comparte su número; store = tienda con ese celular (o None)."""
+    replies: list[str] = []
+
+    class PhoneSession:
+        async def scalar(self, statement):
+            return store
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield PhoneSession()
+
+    async def no_store(session, chat_id):
+        return None
+
+    async def saved_consent(session, store_id, chat_id):
+        return consent
+
+    async def record(update, text, reply_markup=None):
+        replies.append(text)
+
+    monkeypatch.setattr(handlers, "session_scope", fake_scope)
+    monkeypatch.setattr(handlers, "get_store_by_chat", no_store)
+    monkeypatch.setattr(handlers, "get_consent", saved_consent)
+    monkeypatch.setattr(handlers, "_reply", record)
+    return replies
+
+
+def own_phone(phone="+57 300 123 4567"):
+    return message_update(contact={"phone_number": phone, "user_id": 555})
+
+
+def phone_store(**overrides):
+    values = dict(
+        id=7, name="Tienda Doña Marta", owner_name="Marta", owner_phone="573001234567",
+        telegram_chat_id=None, consent_at=None, delivery_days_set_at=datetime(2026, 10, 1, tzinfo=UTC),
+        last_activity_at=None, idle_notice_sent_at=None,
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.asyncio
+async def test_new_account_shares_phone_and_is_asked_for_consent(monkeypatch):
+    store = phone_store()
+    replies = login_with_phone(monkeypatch, store)
+    await handlers.handle_contact(own_phone(), None)
+    assert store.telegram_chat_id == 555
+    assert store.consent_at is None
+    assert replies == [texts.PHONE_VERIFIED, texts.CONSENT_NOTICE]
+
+
+@pytest.mark.asyncio
+async def test_same_account_returns_without_consent_again(monkeypatch):
+    accepted = datetime(2026, 10, 1, tzinfo=UTC)
+    store = phone_store()
+    replies = login_with_phone(monkeypatch, store, consent=accepted)
+    await handlers.handle_contact(own_phone(), None)
+    assert store.telegram_chat_id == 555
+    assert store.consent_at == accepted
+    assert replies == [texts.PHONE_VERIFIED, texts.welcome_back("Marta", "Tienda Doña Marta")]
+
+
+@pytest.mark.asyncio
+async def test_forwarded_contact_of_someone_else_is_rejected(monkeypatch):
+    store = phone_store()
+    replies = login_with_phone(monkeypatch, store)
+    await handlers.handle_contact(message_update(contact={"phone_number": "573001234567", "user_id": 999}), None)
+    assert store.telegram_chat_id is None
+    assert replies == [texts.CONTACT_NOT_YOURS]
+
+
+@pytest.mark.asyncio
+async def test_unregistered_phone_cannot_enter(monkeypatch):
+    replies = login_with_phone(monkeypatch, None)
+    await handlers.handle_contact(own_phone("+57 311 000 0000"), None)
+    assert replies == [texts.PHONE_NOT_REGISTERED]
+
+
+@pytest.mark.asyncio
+async def test_phone_owner_takes_session_from_old_chat(monkeypatch):
+    store = phone_store(telegram_chat_id=111, consent_at=datetime(2026, 10, 1, tzinfo=UTC))
+    replies = login_with_phone(monkeypatch, store)
+    sent: list[tuple[int, str]] = []
+
+    class FakeBot:
+        async def send_message(self, chat_id, text):
+            sent.append((chat_id, text))
+
+    await handlers.handle_contact(own_phone(), SimpleNamespace(bot=FakeBot()))
+    assert store.telegram_chat_id == 555
+    # La autorización era de la otra cuenta: esta tiene que dar la suya.
+    assert store.consent_at is None
+    assert replies == [texts.PHONE_VERIFIED, texts.CONSENT_NOTICE]
+    assert sent == [(111, texts.SESSION_MOVED)]

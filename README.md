@@ -19,12 +19,15 @@ El tendero no lleva inventario porque le toma más tiempo del que tiene. Por eso
 | Manda una foto del estante | Estima cuántas unidades hay de cada producto, avisa que es una estimación y deja corregir antes de guardar. |
 | Escribe `/stock` | Muestra el inventario actual. |
 | Escribe `/alertas` | Dice qué se va a acabar y qué no se está vendiendo. |
+| Escribe `/start` y toca 📱 Compartir mi número | Telegram le manda al bot el número verificado de esa cuenta (no se puede escribir otro). Si es el celular que el distribuidor registró para la tienda, entra. Sin códigos ni contraseñas. |
 | Vincula su tienda por primera vez | Le pregunta qué días quiere recibir la mercancía, entre los días en que el proveedor pasa por su barrio. |
 | Escribe `/pedido` | Sugiere el pedido para la próxima entrega, en cajas, con el motivo de cada producto, el total en pesos y la hora límite para enviarlo. |
 | Responde *"quita el arroz"* o *"ponle 2 cajas más de coca"* (por texto o audio) | Ajusta el pedido. El tendero tiene la última palabra; el camión lleva solo lo que él envió. |
 | No ha pedido y se acerca la hora límite | Le manda un recordatorio automático: *"El jueves te llega mercancía. Tienes hasta hoy a las 6 p. m."* |
 | Escribe `/recibido` | Suma la mercancía del pedido al inventario. |
 | Escribe `/catalogo` | Muestra lo que tiene su proveedor, con precios y lo que está agotado. |
+| Escribe `/salir` | Cierra la sesión de la tienda en ese chat (pide confirmación). Los datos se conservan; para volver a entrar basta con compartir el número otra vez. Si entra otra cuenta de Telegram, se le pide su propia autorización de datos. |
+| No usa el bot en 24 horas | Le avisa, de día, que la sesión sigue abierta, con botones para cerrarla o seguir. Un solo aviso hasta que vuelva a usar el bot. |
 
 El distribuidor tiene un **panel web** (`/panel`) con el resumen de sus tiendas, las alertas de cada una, el gráfico de ventas, la clasificación ABC y la demanda agregada de la próxima semana.
 
@@ -106,8 +109,8 @@ uvicorn app.main:app --reload
 
 Con `BOT_MODE=polling` el bot funciona desde tu computador, sin desplegar nada.
 
-- **Bot:** abre tu bot en Telegram, escribe `/start` y usa uno de los códigos de tienda: `MARTA01`, `PARQUE02` o `LUZ03`.
-- **Datos reales:** el seed no inventa ventas, conteos ni pedidos. Todo lo que muestra el panel llega desde Telegram, y el panel se actualiza solo (indicador "En vivo"). Volver a correr el seed borra los datos del distribuidor.
+- **Bot:** primero registra tu celular en el panel (Tiendas → una tienda → Acceso al bot). Luego abre tu bot en Telegram, escribe `/start` y toca 📱 Compartir mi número.
+- **Datos reales:** el seed no inventa ventas, conteos ni pedidos. Todo lo que muestra el panel llega desde Telegram, y el panel se actualiza solo (indicador "En vivo"). Volver a correr el seed borra los datos del distribuidor, también los celulares registrados.
 - **Panel:** entra a http://localhost:8000/panel con `demo@demo.co` y la contraseña de `DEMO_PASSWORD`.
 - **Pruebas:** `python -m pytest`
 
