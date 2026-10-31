@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from telegram import Update
@@ -15,6 +14,7 @@ from telegram.ext import Application
 from app.bot.handlers import register_handlers
 from app.bot.reminders import reminder_loop
 from app.config import get_settings
+from app.web.public import router as public_router
 from app.web.routes import router as panel_router
 
 settings = get_settings()
@@ -89,18 +89,13 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.public_base_url.startswith("https"),
 )
+app.include_router(public_router)
 app.include_router(panel_router)
 app.mount(
     "/panel/static",
     StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
     name="panel_static",
 )
-
-
-@app.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
-    # La raíz lleva al panel; sin sesión, el panel redirige al login.
-    return RedirectResponse("/panel", status_code=303)
 
 
 @app.get("/health")

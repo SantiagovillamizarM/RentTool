@@ -1,0 +1,33 @@
+{# Campos de una tienda en el panel (crear y editar). `v` es un dict con los valores; `days` los días de ruta marcados. #}
+{% macro route_days_picker(days, lead_time) %}
+<fieldset class="wide day-picker">
+  <legend>Días en que tu camión pasa por la tienda</legend>
+  <div class="day-options">
+    {% for name in weekday_names %}
+    <label class="day-option"><input type="checkbox" name="route_days" value="{{ loop.index0 }}"{% if loop.index0 in days %} checked{% endif %}><span>{{ name }}</span></label>
+    {% endfor %}
+  </div>
+</fieldset>
+<label>Días de anticipación para pedir
+  <input name="lead_time_days" value="{{ lead_time or 1 }}" inputmode="numeric" maxlength="1" required>
+</label>
+{% endmacro %}
+
+{% macro store_fields(v, days, with_phone=False) %}
+<label>Nombre de la tienda<input name="name" value="{{ v.name or '' }}" maxlength="160" required></label>
+<label>Dueño<input name="owner_name" value="{{ v.owner_name or '' }}" maxlength="160" required></label>
+{% if with_phone %}<label>Celular del dueño <span class="muted small">(con él entra al bot)</span><input name="phone" value="{{ v.phone or '' }}" inputmode="tel" maxlength="24" placeholder="+57 300 123 4567"></label>{% endif %}
+<label>Cédula o NIT<input name="document_id" value="{{ v.document_id or '' }}" maxlength="20"></label>
+<label>Correo<input name="email" type="email" value="{{ v.email or '' }}" maxlength="255"></label>
+<label>Ciudad<input name="city" value="{{ v.city or '' }}" maxlength="80"></label>
+<label>Barrio<input name="neighborhood" value="{{ v.neighborhood or '' }}" maxlength="120"></label>
+<label>Dirección<input name="address" value="{{ v.address or '' }}" maxlength="200"></label>
+<label>Horario para recibir<input name="receiving_hours" value="{{ v.receiving_hours or '' }}" maxlength="80" placeholder="7 a. m. a 12 m."></label>
+<label>Forma de pago
+  <select name="payment_method">
+    <option value="">Sin definir</option>
+    {% for key, label in payment_methods.items() %}<option value="{{ key }}"{% if v.payment_method == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+</label>
+{{ route_days_picker(days, v.lead_time_days) }}
+{% endmacro %}

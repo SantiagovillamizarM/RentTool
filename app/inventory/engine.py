@@ -12,10 +12,10 @@ from collections.abc import Iterator
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Product, Receipt, Sale, StockCount, Store
+from app.models import Product, Receipt, Sale, StockCount, Store, SuggestedOrder, SuggestedOrderItem
 
 # Colombia no tiene horario de verano: UTC-5 fijo (evita depender de tzdata en Windows).
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
@@ -29,6 +29,9 @@ ABC_B_LIMIT = 0.95
 PROJECTION_DAYS = 7
 # Hora límite para pedir (hora Colombia), `lead_time_days` días antes de la entrega.
 ORDER_CUTOFF_HOUR = 18
+# Un pedido enviado cuenta como "en camino" hasta unos días después de su entrega. Si el
+# tendero nunca escribe /recibido, deja de restarse y el bot vuelve a sugerir esos productos.
+IN_TRANSIT_GRACE_DAYS = 2
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ class ProductAnalysis:
     stagnant: bool = False
     reason: str = ""
     projected_units_7d: float = 0.0
+    in_transit: int = 0
 
 
 @dataclass
@@ -250,14 +254,16 @@ def analyze_product(
     receipts: list[ReceiptEvent],
     today: date,
     horizon_days: int,
+    in_transit: int = 0,
 ) -> ProductAnalysis:
+    """`in_transit` son unidades de pedidos ya enviados que aún no llegan: se restan del pedido."""
     stock, has_count = compute_stock(counts, receipts, sales)
     series = daily_sales_series(sales, today)
     daily = sum(series) / WINDOW_DAYS
     std_dev = statistics.pstdev(series)
     coverage = stock / daily if daily > 0 else math.inf
     safety = SAFETY_Z * std_dev * math.sqrt(horizon_days)
-    need = daily * horizon_days + safety - stock
+    need = daily * horizon_days + safety - stock - in_transit
     units_per_case = max(1, product.units_per_case)
     cases = math.ceil(max(0.0, need) / units_per_case)
 
@@ -295,6 +301,7 @@ def analyze_product(
         stagnant=stagnant,
         reason=build_reason(daily, coverage, has_count),
         projected_units_7d=daily * PROJECTION_DAYS,
+        in_transit=in_transit,
     )
 
 
@@ -307,8 +314,10 @@ def analyze_store(
     counts: list[CountEvent],
     receipts: list[ReceiptEvent],
     now: datetime,
+    in_transit: dict[int, int] | None = None,
 ) -> StoreAnalysis:
     now = _ensure_aware(now)
+    in_transit = in_transit or {}
     today = local_date(now)
     # Lo que se pide hoy llega en la próxima entrega y debe durar hasta la siguiente.
     schedule = delivery_schedule(visit_weekdays, lead_time_days, now)
@@ -335,6 +344,7 @@ def analyze_store(
             receipts_by_product[p.product_id],
             today,
             horizon,
+            in_transit.get(p.product_id, 0),
         )
         for p in products
     ]
@@ -428,6 +438,22 @@ async def load_store_analysis(
     ).all()
     receipts = [ReceiptEvent(r.product_id, r.quantity, r.received_at) for r in receipt_rows]
 
+    # Pedidos enviados que todavía no llegan: lo que traen no se vuelve a pedir.
+    transit_since = local_date(now) - timedelta(days=IN_TRANSIT_GRACE_DAYS)
+    transit_rows = (
+        await session.execute(
+            select(SuggestedOrderItem.product_id, func.sum(SuggestedOrderItem.units))
+            .join(SuggestedOrder, SuggestedOrder.id == SuggestedOrderItem.order_id)
+            .where(
+                SuggestedOrder.store_id == store_id,
+                SuggestedOrder.status == "sent",
+                SuggestedOrder.delivery_date >= transit_since,
+            )
+            .group_by(SuggestedOrderItem.product_id)
+        )
+    ).all()
+    in_transit = {product_id: int(units or 0) for product_id, units in transit_rows}
+
     return analyze_store(
         store_id=store.id,
         visit_weekdays=store.visit_weekdays,
@@ -437,4 +463,5 @@ async def load_store_analysis(
         counts=counts,
         receipts=receipts,
         now=now,
+        in_transit=in_transit,
     )

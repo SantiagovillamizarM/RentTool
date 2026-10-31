@@ -13,7 +13,7 @@
   <span class="kpi-icon">{{ icon.store() }}</span>
   <div>
     <h2>Todavía no hay tiendas conectadas</h2>
-    <p class="muted">El panel se llena solo con lo que tus tenderos registran en Telegram: ventas, conteos del estante y pedidos. Pásale a cada tendero el código de su tienda (está en <a href="/panel/tiendas">Tiendas</a>) para que lo escriba en el bot después de <strong>/start</strong>.</p>
+    <p class="muted">El panel se llena solo con lo que tus tenderos registran en Telegram: ventas, conteos del estante y pedidos. Las tiendas llegan por <a href="/panel/solicitudes">Solicitudes</a> o las agregas en <a href="/panel/tiendas">Tiendas</a>; el tendero entra al bot compartiendo el celular registrado.</p>
   </div>
 </section>
 {% endif %}
@@ -22,19 +22,19 @@
   <div class="kpi">
     <span class="kpi-icon">{{ icon.store() }}</span>
     <span class="kpi-label">Tiendas activas</span>
-    <span class="kpi-value">{{ stores_linked }} <small>/ {{ stores_total }}</small></span>
+    <span class="kpi-value"><span data-count="{{ stores_linked }}">{{ stores_linked }}</span> <small>/ {{ stores_total }}</small></span>
     <span class="kpi-note">vinculadas al bot</span>
   </div>
   <div class="kpi {{ 'kpi-risk' if stores_at_risk }}">
     <span class="kpi-icon">{{ icon.alert() }}</span>
     <span class="kpi-label">Tiendas en riesgo de quiebre</span>
-    <span class="kpi-value">{{ stores_at_risk }}</span>
+    <span class="kpi-value" data-count="{{ stores_at_risk }}">{{ stores_at_risk }}</span>
     <span class="kpi-note">con al menos un producto por agotarse</span>
   </div>
   <div class="kpi kpi-featured">
     <span class="kpi-icon">{{ icon.box() }}</span>
     <span class="kpi-label">Pedidos por despachar</span>
-    <span class="kpi-value">{{ sent_value|cop }}</span>
+    <span class="kpi-value" data-count="{{ sent_value|round|int }}" data-prefix="$ ">{{ sent_value|cop }}</span>
     <span class="kpi-note">{{ sent_count }} pedido{{ '' if sent_count == 1 else 's' }} enviado{{ '' if sent_count == 1 else 's' }} desde el bot</span>
   </div>
 </div>

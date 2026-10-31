@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Inventario y pedidos para tu tienda{% endblock %}
+{% block content %}
+<header class="site-header">
+  <a class="brand" href="/">
+    <img src="/panel/static/logo.png" alt="">
+    <span>TenderoBot<small>Para tiendas de barrio</small></span>
+  </a>
+  <nav class="site-nav" aria-label="Secciones">
+    <a href="#como-funciona">Cómo funciona</a>
+    <a href="#distribuidores">Distribuidores</a>
+    <a href="/panel/login" class="site-login">Ingresar al panel</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="hero-copy">
+    <span class="eyebrow">Inventario con IA en Telegram</span>
+    <h1>Tu tienda surtida, <span class="accent">sin cuadernos.</span></h1>
+    <p>Le cuentas a TenderoBot lo que vendes, le mandas una foto del estante y él te arma el pedido para tu distribuidor. Así no te quedas sin lo que más se vende ni te llenas de lo que no sale.</p>
+    <div class="hero-actions">
+      <a href="#solicitar" class="btn btn-primary">Pedir acceso <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+      <a href="#como-funciona" class="btn btn-ghost">Ver cómo funciona</a>
+    </div>
+    <p class="hero-note">Gratis para el tendero · Solo necesitas Telegram</p>
+  </div>
+
+  <div class="chat-mock" aria-hidden="true">
+    <div class="chat-top"><img src="/panel/static/logo.png" alt=""><div><strong>TenderoBot</strong><span>en línea</span></div></div>
+    <div class="bubble me">🎤 vendí 2 coca litro y un pan</div>
+    <div class="bubble bot">¿Confirmas estas ventas?<br>• 2 Coca-Cola 1L<br>• 1 Pan tajado
+      <div class="bubble-buttons"><span>✅ Confirmar</span><span>❌ Cancelar</span></div>
+    </div>
+    <div class="bubble me">/pedido</div>
+    <div class="bubble bot">📦 Pedido para el jueves:<br>• 3 cajas Coca-Cola 1L — te alcanza para 1 día<br>• 1 caja Arroz Roa 500 g<br><strong>Total: $312.000</strong>
+      <div class="bubble-buttons"><span>✅ Enviar al distribuidor</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="landing-section reveal" id="como-funciona">
+  <span class="eyebrow">Cómo funciona</span>
+  <h2>Cuatro cosas, desde el celular</h2>
+  <div class="steps">
+    <article class="step reveal" style="--i: 1">{{ icon.mic() }}<h3>Cuéntale lo que vendes</h3><p>Por audio o por texto: "2 coca litro y un pan". Antes de guardar te pregunta si está bien.</p></article>
+    <article class="step reveal" style="--i: 2">{{ icon.camera() }}<h3>Mándale una foto</h3><p>Le tomas foto al estante y te dice cuántas unidades ve. Si se equivoca, lo corriges.</p></article>
+    <article class="step reveal" style="--i: 3">{{ icon.box() }}<h3>Recibe tu pedido sugerido</h3><p>Con <strong>/pedido</strong> te dice qué pedir en cajas, por qué y cuánto cuesta. Lo cambias hablando: "quita el arroz".</p></article>
+    <article class="step reveal" style="--i: 4">{{ icon.truck() }}<h3>Envíalo con un botón</h3><p>Le llega a tu distribuidor. Te recuerda antes de la hora límite y, cuando llega, lo sumas con <strong>/recibido</strong>.</p></article>
+  </div>
+</section>
+
+<section class="landing-section benefits reveal">
+  <div>
+    <span class="eyebrow">Lo que ganas</span>
+    <h2>Menos tiempo contando, <span class="accent">más vendiendo</span></h2>
+  </div>
+  <ul class="benefit-list">
+    <li class="reveal" style="--i: 1"><strong>No te quedas sin lo que más se vende.</strong> Te avisa qué se te va a acabar antes de que pase.</li>
+    <li class="reveal" style="--i: 2"><strong>No te llenas de lo que no sale.</strong> Te dice qué lleva semanas quieto en el estante.</li>
+    <li class="reveal" style="--i: 3"><strong>Precios al día.</strong> Te avisa cuando tu distribuidor cambia un precio o trae algo nuevo.</li>
+    <li class="reveal" style="--i: 4"><strong>Tus datos son tuyos.</strong> Solo los ves tú y tu distribuidor, como manda la Ley 1581 de 2012.</li>
+  </ul>
+</section>
+
+<section class="landing-section request-section reveal" id="solicitar">
+  <div class="request-intro">
+    <span class="eyebrow">Pedir acceso</span>
+    <h2>Empieza en tres pasos</h2>
+    <ol class="mini-steps">
+      <li><strong>Llenas este formulario</strong> con los datos de tu tienda.</li>
+      <li><strong>Tu distribuidor lo revisa</strong>: tus datos y si su camión llega hasta tu tienda.</li>
+      <li><strong>Te avisamos por Telegram</strong> apenas te respondan. Si no has abierto el bot, te escribimos al correo.</li>
+    </ol>
+  </div>
+
+  <form method="post" action="/solicitud" class="card request-form form-grid" novalidate>
+    {% for error in errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
+    {% if distributors|length > 1 %}
+    <label class="wide">Tu distribuidor
+      <select name="distributor_id" required>
+        <option value="">Escoge uno</option>
+        {% for d in distributors %}<option value="{{ d.id }}"{% if form.distributor_id == d.id|string %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <label>Nombre de la tienda<input name="store_name" value="{{ form.store_name or '' }}" maxlength="160" autocomplete="organization" required></label>
+    <label>Tu nombre<input name="owner_name" value="{{ form.owner_name or '' }}" maxlength="160" autocomplete="name" required></label>
+    <label>Cédula o NIT<input name="document_id" value="{{ form.document_id or '' }}" maxlength="20" inputmode="numeric" required></label>
+    <label>Celular <span class="hint">El mismo de tu Telegram</span><input name="phone" value="{{ form.phone or '' }}" inputmode="tel" maxlength="24" autocomplete="tel" placeholder="300 123 4567" required></label>
+    <label class="wide">Correo <span class="hint">Por si no abres el bot</span><input name="email" type="email" value="{{ form.email or '' }}" maxlength="255" autocomplete="email" placeholder="tienda@gmail.com" required></label>
+    <label>Ciudad<input name="city" value="{{ form.city or '' }}" maxlength="80" autocomplete="address-level2" required></label>
+    <label>Barrio<input name="neighborhood" value="{{ form.neighborhood or '' }}" maxlength="120" required></label>
+    <label class="wide">Dirección<input name="address" value="{{ form.address or '' }}" maxlength="200" autocomplete="street-address" placeholder="Calle 45 # 12-30" required></label>
+    <label>Horario para recibir mercancía<input name="receiving_hours" value="{{ form.receiving_hours or '' }}" maxlength="80" placeholder="7 a. m. a 12 m." required></label>
+    <fieldset class="choice">
+      <legend>¿Cómo pagarías los pedidos?</legend>
+      {% for key, label in payment_methods.items() %}
+      <label class="choice-option"><input type="radio" name="payment_method" value="{{ key }}"{% if form.payment_method == key %} checked{% endif %}><span>{{ label }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="wide location">
+      <input type="hidden" name="latitude" id="latitude" value="{{ form.latitude or '' }}">
+      <input type="hidden" name="longitude" id="longitude" value="{{ form.longitude or '' }}">
+      <button type="button" class="btn btn-ghost" id="use-location">📍 Usar mi ubicación</button>
+      <span class="muted small" id="location-status">{% if form.latitude %}Ubicación agregada.{% else %}Opcional: ayuda al distribuidor a encontrar tu tienda. Úsalo estando en la tienda.{% endif %}</span>
+    </div>
+    <label class="wide consent">
+      <input type="checkbox" name="consent"{% if form.consent == 'on' %} checked{% endif %} required>
+      <span>Autorizo a TenderoBot y a mi distribuidor a usar estos datos para revisar mi solicitud y, si me aprueban, para manejar el inventario y los pedidos de mi tienda (Ley 1581 de 2012). Puedo pedir conocerlos, corregirlos o borrarlos cuando quiera.</span>
+    </label>
+    <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
+    <div class="actions wide">
+      <button type="submit" class="primary">Enviar solicitud <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </div>
+  </form>
+</section>
+
+<section class="landing-section distributors reveal" id="distribuidores">
+  <div>
+    <span class="eyebrow">Para distribuidores</span>
+    <h2>Tus tiendas, <span class="accent">siempre surtidas</span></h2>
+    <p>Ves qué se les va a acabar a tus tenderos, qué no se vende y cuánto vas a despachar la próxima semana. Los pedidos te llegan armados, en cajas completas y ajustados a lo que tienes.</p>
+  </div>
+  <a href="/panel/login" class="btn btn-ghost">Ingresar al panel <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+</section>
+
+<footer class="site-footer reveal">
+  <span>TenderoBot · Inventario con IA para tiendas de barrio en Colombia</span>
+  <span>Tratamiento de datos según la Ley 1581 de 2012</span>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var button = document.getElementById("use-location");
+    var status = document.getElementById("location-status");
+    if (!navigator.geolocation) { button.hidden = true; return; }
+    button.addEventListener("click", function () {
+      status.textContent = "Buscando tu ubicación…";
+      navigator.geolocation.getCurrentPosition(function (position) {
+        document.getElementById("latitude").value = position.coords.latitude.toFixed(6);
+        document.getElementById("longitude").value = position.coords.longitude.toFixed(6);
+        status.textContent = "Ubicación agregada.";
+      }, function () {
+        status.textContent = "No pudimos tomar tu ubicación. No pasa nada: es opcional.";
+      }, { enableHighAccuracy: true, timeout: 15000 });
+    });
+  })();
+  {% if errors %}var form = document.getElementById("solicitar"); form.classList.add("in"); form.scrollIntoView({ behavior: "instant" });{% endif %}
+</script>
+{% endblock %}

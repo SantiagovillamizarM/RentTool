@@ -40,8 +40,10 @@ from app.models import (
     Store,
     StoreConsent,
     SuggestedOrder,
+    StoreRequest,
     SuggestedOrderItem,
 )
+from app.onboarding import request_page_url
 from app.phones import normalize_phone
 from app.schemas import SaleLine, StockLine
 
@@ -129,6 +131,7 @@ async def require_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if store is not None:
             store.last_activity_at = datetime.now(UTC)
             return
+        in_review = await has_request_in_review(session, chat_id)
     message = update.message
     if message is not None and message.contact is not None:
         return
@@ -137,8 +140,28 @@ async def require_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     query = update.callback_query
     if query is not None:
         await query.answer()
-    await _ask_login(update)
+    if in_review:
+        await _reply(update, texts.REQUEST_IN_REVIEW)
+    else:
+        await _ask_login(update)
     raise ApplicationHandlerStop
+
+
+async def has_request_in_review(session: AsyncSession, chat_id: int) -> bool:
+    """¿Este chat pidió acceso desde la página y su distribuidor aún no responde?"""
+    found = await session.scalar(
+        select(StoreRequest.id).where(StoreRequest.telegram_chat_id == chat_id, StoreRequest.status == "pending")
+    )
+    return found is not None
+
+
+async def find_request_by_phone(session: AsyncSession, phone: str) -> StoreRequest | None:
+    """La solicitud más reciente de ese celular (en revisión o rechazada)."""
+    return await session.scalar(
+        select(StoreRequest)
+        .where(StoreRequest.phone == phone, StoreRequest.status.in_(("pending", "rejected")))
+        .order_by(StoreRequest.id.desc())
+    )
 
 
 async def get_store_by_chat(session: AsyncSession, chat_id: int) -> Store | None:
@@ -214,7 +237,19 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         store = await session.scalar(select(Store).where(Store.owner_phone == phone)) if phone else None
         if store is None:
-            await _ask_login(update, texts.PHONE_NOT_REGISTERED)
+            request = await find_request_by_phone(session, phone) if phone else None
+            if request is not None and request.status == "pending":
+                # Pidió acceso en la página: se guarda el chat para avisarle aquí cuando decidan.
+                request.telegram_chat_id = chat_id
+                await _reply(update, texts.REQUEST_IN_REVIEW, reply_markup=keyboards.remove_keyboard())
+            elif request is not None:
+                await _reply(
+                    update,
+                    texts.request_rejected(request.store_name, request.rejection_reason or "", request_page_url()),
+                    reply_markup=keyboards.remove_keyboard(),
+                )
+            else:
+                await _ask_login(update, texts.phone_not_registered(request_page_url()))
             return
         if store.telegram_chat_id is not None:
             # El dueño del número verificado manda: la sesión pasa a esta cuenta.
@@ -454,10 +489,11 @@ async def get_pending(session: AsyncSession, store_id: int, kind: str) -> Pendin
 
 async def replace_pending(
     session: AsyncSession, store_id: int, kind: str, payload: dict, ttl: timedelta = PENDING_TTL
-) -> None:
+) -> PendingAction:
     """Un borrador por tipo: el nuevo reemplaza al anterior del mismo tipo.
 
-    Así registrar una venta no borra el pedido que el tendero está armando.
+    Así registrar una venta no borra el pedido que el tendero está armando. Cada cambio crea
+    un borrador con id nuevo: los botones de los mensajes anteriores dejan de servir.
     """
     rows = (
         await session.scalars(
@@ -466,14 +502,54 @@ async def replace_pending(
     ).all()
     for row in rows:
         await session.delete(row)
-    session.add(
-        PendingAction(
-            store_id=store_id,
-            kind=kind,
-            payload=payload,
-            expires_at=datetime.now(UTC) + ttl,
+    pending = PendingAction(
+        store_id=store_id,
+        kind=kind,
+        payload=payload,
+        expires_at=datetime.now(UTC) + ttl,
+    )
+    session.add(pending)
+    await session.flush()
+    return pending
+
+
+async def get_button_draft(update: Update, session: AsyncSession, store_id: int, kind: str) -> PendingAction | None:
+    """El borrador del mensaje cuyo botón se pulsó, si sigue vigente.
+
+    Un botón de un resumen anterior (ya reemplazado, confirmado o vencido) no devuelve nada,
+    para que nunca confirme algo distinto de lo que el tendero tiene en pantalla.
+    FOR UPDATE: con dos toques seguidos, el segundo espera y ya no encuentra el borrador.
+    """
+    query = update.callback_query
+    pending_id = keyboards.draft_id(query.data if query is not None else None)
+    if pending_id is None:
+        return None
+    return await session.scalar(
+        select(PendingAction).where(
+            PendingAction.id == pending_id,
+            PendingAction.store_id == store_id,
+            PendingAction.kind == kind,
+            PendingAction.expires_at > datetime.now(UTC),
+        )
+        .with_for_update()
+    )
+
+
+async def _stale_button(update: Update) -> None:
+    await _remove_buttons(update)
+    await _reply(update, texts.STALE_BUTTON)
+
+
+async def order_sent_for(session: AsyncSession, store_id: int, delivery: date) -> bool:
+    """¿Ya hay un pedido enviado (o recibido) para esa entrega?"""
+    found = await session.scalar(
+        select(SuggestedOrder.id).where(
+            SuggestedOrder.store_id == store_id,
+            SuggestedOrder.delivery_date == delivery,
+            SuggestedOrder.status.in_(("sent", "received")),
         )
     )
+    return found is not None
 
 
 async def _download_file(context: ContextTypes.DEFAULT_TYPE, file_id: str) -> bytes:
@@ -500,13 +576,14 @@ async def save_and_show_sales(
         await _reply(update, summary)
         return
     async with session_scope() as session:
-        await replace_pending(
+        pending = await replace_pending(
             session,
             store_id,
             KIND_SALES,
             {"source": source, "lines": payload_lines},
         )
-    await _reply(update, summary, reply_markup=keyboards.confirm_sales_keyboard())
+        pending_id = pending.id
+    await _reply(update, summary, reply_markup=keyboards.confirm_sales_keyboard(pending_id))
 
 
 async def save_and_show_stock(
@@ -521,13 +598,14 @@ async def save_and_show_stock(
         await _reply(update, summary)
         return
     async with session_scope() as session:
-        await replace_pending(
+        pending = await replace_pending(
             session,
             store_id,
             KIND_STOCK,
             {"source": "photo", "lines": payload_lines},
         )
-    await _reply(update, summary, reply_markup=keyboards.confirm_stock_keyboard())
+        pending_id = pending.id
+    await _reply(update, summary, reply_markup=keyboards.confirm_stock_keyboard(pending_id))
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -596,7 +674,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def route_text(update: Update, text: str, source: str) -> None:
-    """Texto del tendero (escrito o de un audio): corrige el conteo, cambia el pedido o registra ventas."""
+    """Texto del tendero (escrito o de un audio): corrige el conteo o lo recibido, cambia el pedido
+    o registra ventas."""
     async with session_scope() as session:
         store = await require_ready_store(update, session)
         if store is None:
@@ -605,24 +684,36 @@ async def route_text(update: Update, text: str, source: str) -> None:
         products = await load_active_products(session, store.distributor_id)
         catalog = products_as_catalog(products)
         names = names_by_sku(products)
-        pending_stock = await get_pending(session, store.id, KIND_STOCK)
         correction = parse_stock_correction(text)
-        if pending_stock is not None and correction is not None:
-            name, quantity = correction
-            match = best_product_match(name, catalog)
-            if match is None:
-                await _reply(update, texts.AI_FAIL)
+        if correction is not None:
+            # "coca litro 8" corrige el último resumen abierto: el conteo de la foto o lo recibido.
+            drafts = [
+                draft
+                for draft in (
+                    await get_pending(session, store.id, KIND_STOCK),
+                    await get_pending(session, store.id, KIND_RECEIPT),
+                )
+                if draft is not None
+            ]
+            if drafts:
+                draft = max(drafts, key=lambda row: row.id)
+                if draft.kind == KIND_RECEIPT:
+                    await apply_receipt_correction(update, session, store, draft, correction)
+                    return
+                name, quantity = correction
+                match = best_product_match(name, catalog)
+                if match is None:
+                    await _reply(update, texts.AI_FAIL)
+                    return
+                sku = str(match["sku"])
+                lines = apply_stock_correction(list(draft.payload.get("lines") or []), sku, quantity)
+                pending = await replace_pending(session, store.id, KIND_STOCK, {**draft.payload, "lines": lines})
+                await _reply(
+                    update,
+                    texts.stock_summary(lines, names),
+                    reply_markup=keyboards.confirm_stock_keyboard(pending.id),
+                )
                 return
-            sku = str(match["sku"])
-            lines = apply_stock_correction(list(pending_stock.payload.get("lines") or []), sku, quantity)
-            pending_stock.payload = {**pending_stock.payload, "lines": lines}
-            pending_stock.expires_at = datetime.now(UTC) + PENDING_TTL
-            await _reply(
-                update,
-                texts.stock_summary(lines, names),
-                reply_markup=keyboards.confirm_stock_keyboard(),
-            )
-            return
         pending_order = await get_pending(session, store.id, KIND_ORDER)
         order_payload = dict(pending_order.payload) if pending_order is not None else None
 
@@ -664,8 +755,10 @@ async def apply_order_message(
         if pending is None:
             await _reply(update, texts.NOTHING_PENDING)
             return True
-        pending.payload = {**pending.payload, "lines": capped.lines}
-        pending.expires_at = datetime.now(UTC) + ORDER_PENDING_TTL
+        pending = await replace_pending(
+            session, store_id, KIND_ORDER, {**pending.payload, "lines": capped.lines}, ttl=ORDER_PENDING_TTL
+        )
+        pending_id = pending.id
     lines = to_order_lines(capped.lines, by_id)
     await _reply(
         update,
@@ -677,7 +770,7 @@ async def apply_order_message(
             result.not_found,
             capped.not_found,
         ),
-        reply_markup=keyboards.order_keyboard(),
+        reply_markup=keyboards.order_keyboard(pending_id),
     )
     return True
 
@@ -688,9 +781,9 @@ async def handle_confirm_sales(update: Update, context: ContextTypes.DEFAULT_TYP
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_SALES)
+        pending = await get_button_draft(update, session, store.id, KIND_SALES)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
             return
         products = products_by_sku(await load_active_products(session, store.distributor_id))
         source = pending.payload.get("source") or "text"
@@ -715,6 +808,7 @@ async def handle_confirm_sales(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             saved += 1
         await session.delete(pending)
+    await _remove_buttons(update)
     await _reply(update, texts.SAVED_SALES if saved else texts.EMPTY_SALES)
 
 
@@ -724,11 +818,12 @@ async def handle_cancel_sales(update: Update, context: ContextTypes.DEFAULT_TYPE
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_SALES)
+        pending = await get_button_draft(update, session, store.id, KIND_SALES)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
             return
         await session.delete(pending)
+    await _remove_buttons(update)
     await _reply(update, texts.CANCELLED)
 
 
@@ -738,9 +833,9 @@ async def handle_confirm_stock(update: Update, context: ContextTypes.DEFAULT_TYP
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_STOCK)
+        pending = await get_button_draft(update, session, store.id, KIND_STOCK)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
             return
         products = products_by_sku(await load_active_products(session, store.distributor_id))
         source = pending.payload.get("source") or "photo"
@@ -764,6 +859,7 @@ async def handle_confirm_stock(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             saved += 1
         await session.delete(pending)
+    await _remove_buttons(update)
     await _reply(update, texts.SAVED_STOCK if saved else texts.EMPTY_STOCK)
 
 
@@ -773,15 +869,17 @@ async def handle_cancel_stock(update: Update, context: ContextTypes.DEFAULT_TYPE
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_STOCK)
+        pending = await get_button_draft(update, session, store.id, KIND_STOCK)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
             return
         await session.delete(pending)
+    await _remove_buttons(update)
     await _reply(update, texts.CANCELLED)
 
 
 KIND_ORDER = "order"
+KIND_RECEIPT = "receipt"
 
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -819,6 +917,9 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if analysis is None:
             await _ask_login(update)
             return
+        if await order_sent_for(session, store.id, analysis.next_delivery):
+            await _reply(update, texts.order_already_sent(analysis.next_delivery))
+            return
         by_id = {p.id: p for p in await load_active_products(session, store.distributor_id)}
         capped = cap_to_available(
             [
@@ -828,7 +929,7 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             by_id,
         )
         payload_lines = capped.lines
-        await replace_pending(
+        pending = await replace_pending(
             session,
             store.id,
             KIND_ORDER,
@@ -839,6 +940,7 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             },
             ttl=ORDER_PENDING_TTL,
         )
+        pending_id = pending.id
     lines = to_order_lines(payload_lines, by_id)
     await _reply(
         update,
@@ -849,7 +951,7 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             analysis.order_deadline,
             availability_notes=capped.not_found,
         ),
-        reply_markup=keyboards.order_keyboard(),
+        reply_markup=keyboards.order_keyboard(pending_id),
     )
 
 
@@ -859,9 +961,17 @@ async def handle_send_order(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_ORDER)
+        pending = await get_button_draft(update, session, store.id, KIND_ORDER)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
+            return
+        # Si pasó la hora límite mientras lo revisaba, el pedido va para la entrega siguiente.
+        schedule = delivery_schedule(store.visit_weekdays, store.lead_time_days, datetime.now(UTC))
+        if await order_sent_for(session, store.id, schedule.next_delivery):
+            # Un solo pedido por entrega (p. ej. dos borradores abiertos o doble toque).
+            await session.delete(pending)
+            await _remove_buttons(update)
+            await _reply(update, texts.order_already_sent(schedule.next_delivery))
             return
         draft_lines = list(pending.payload.get("lines") or [])
         product_ids = [int(line.get("product_id") or 0) for line in draft_lines]
@@ -883,10 +993,9 @@ async def handle_send_order(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         drafted_for = pending.payload.get("delivery_date")
         await session.delete(pending)
         if not lines:
+            await _remove_buttons(update)
             await _reply(update, texts.NO_ORDER)
             return
-        # Si pasó la hora límite mientras lo revisaba, el pedido va para la entrega siguiente.
-        schedule = delivery_schedule(store.visit_weekdays, store.lead_time_days, datetime.now(UTC))
         missed_deadline = drafted_for is not None and drafted_for != schedule.next_delivery.isoformat()
         order = SuggestedOrder(store_id=store.id, status="sent", delivery_date=schedule.next_delivery)
         for line in lines:
@@ -902,6 +1011,7 @@ async def handle_send_order(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if product.available_units is not None:
                 product.available_units -= line.units
         session.add(order)
+    await _remove_buttons(update)
     await _reply(update, texts.order_sent(schedule.next_delivery, missed_deadline, capped.not_found))
 
 
@@ -911,39 +1021,139 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         store = await require_ready_store(update, session)
         if store is None:
             return
-        pending = await get_pending(session, store.id, KIND_ORDER)
+        pending = await get_button_draft(update, session, store.id, KIND_ORDER)
         if pending is None:
-            await _reply(update, texts.NOTHING_PENDING)
+            await _stale_button(update)
             return
         await session.delete(pending)
     await _remove_buttons(update)
     await _reply(update, texts.ORDER_CANCELLED)
 
 
+async def oldest_sent_order(session: AsyncSession, store_id: int, exclude_id: int | None = None):
+    """El pedido enviado que debería llegar primero (el de entrega más cercana)."""
+    query = select(SuggestedOrder).where(SuggestedOrder.store_id == store_id, SuggestedOrder.status == "sent")
+    if exclude_id is not None:
+        query = query.where(SuggestedOrder.id != exclude_id)
+    return await session.scalar(
+        query.order_by(
+            SuggestedOrder.delivery_date.asc().nulls_last(), SuggestedOrder.created_at, SuggestedOrder.id
+        )
+    )
+
+
 async def handle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra lo que trae el pedido para que el tendero confirme o corrija lo que llegó."""
     async with session_scope() as session:
         store = await require_ready_store(update, session)
         if store is None:
             return
-        order = await session.scalar(
-            select(SuggestedOrder)
-            .where(SuggestedOrder.store_id == store.id, SuggestedOrder.status == "sent")
-            .order_by(SuggestedOrder.created_at.desc(), SuggestedOrder.id.desc())
-        )
+        order = await oldest_sent_order(session, store.id)
         if order is None:
             await _reply(update, texts.NO_SENT_ORDER)
             return
-        items = (
-            await session.scalars(select(SuggestedOrderItem).where(SuggestedOrderItem.order_id == order.id))
+        rows = (
+            await session.execute(
+                select(SuggestedOrderItem, Product)
+                .join(Product, Product.id == SuggestedOrderItem.product_id)
+                .where(SuggestedOrderItem.order_id == order.id, SuggestedOrderItem.units > 0)
+                .order_by(Product.name)
+            )
         ).all()
+        lines = [
+            {"product_id": product.id, "name": product.name, "units": item.units, "ordered": item.units}
+            for item, product in rows
+        ]
+        delivery = order.delivery_date
+        pending = await replace_pending(
+            session,
+            store.id,
+            KIND_RECEIPT,
+            {"order_id": order.id, "delivery_date": delivery.isoformat() if delivery else None, "lines": lines},
+        )
+        pending_id = pending.id
+    await _reply(
+        update, texts.receipt_summary(lines, delivery), reply_markup=keyboards.confirm_receipt_keyboard(pending_id)
+    )
+
+
+async def apply_receipt_correction(
+    update: Update, session: AsyncSession, store: Store, draft: PendingAction, correction: tuple[str, int]
+) -> None:
+    """Con "coca litro 8" el tendero dice que de ese producto llegaron 8 unidades.
+
+    Solo se corrigen productos que venían en el pedido.
+    """
+    name, quantity = correction
+    delivery = draft.payload.get("delivery_date")
+    lines = [dict(line) for line in draft.payload.get("lines") or []]
+    ids = [int(line["product_id"]) for line in lines]
+    order_products = (
+        await session.scalars(
+            select(Product).where(Product.id.in_(ids), Product.distributor_id == store.distributor_id)
+        )
+    ).all()
+    match = best_product_match(name, products_as_catalog(list(order_products)))
+    if match is None:
+        await _reply(update, texts.RECEIPT_NOT_IN_ORDER)
+        return
+    product_id = next(p.id for p in order_products if p.sku == match["sku"])
+    for line in lines:
+        if int(line["product_id"]) == product_id:
+            line["units"] = quantity
+    pending = await replace_pending(session, store.id, KIND_RECEIPT, {**draft.payload, "lines": lines})
+    await _reply(
+        update,
+        texts.receipt_summary(lines, date.fromisoformat(delivery) if delivery else None),
+        reply_markup=keyboards.confirm_receipt_keyboard(pending.id),
+    )
+
+
+async def handle_confirm_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Suma al inventario lo que de verdad llegó y da el pedido por recibido."""
+    await _answer_callback(update)
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        pending = await get_button_draft(update, session, store.id, KIND_RECEIPT)
+        order = await session.get(SuggestedOrder, int(pending.payload.get("order_id") or 0)) if pending else None
+        if pending is None or order is None or order.store_id != store.id or order.status != "sent":
+            if pending is not None:
+                await session.delete(pending)
+            await _stale_button(update)
+            return
         now = datetime.now(UTC)
-        for item in items:
-            if item.units > 0:
+        missing: list[str] = []
+        for line in pending.payload.get("lines") or []:
+            units, ordered = int(line.get("units") or 0), int(line.get("ordered") or 0)
+            if units > 0:
                 session.add(
-                    Receipt(store_id=store.id, product_id=item.product_id, quantity=item.units, received_at=now)
+                    Receipt(store_id=store.id, product_id=int(line["product_id"]), quantity=units, received_at=now)
                 )
+            if units < ordered:
+                missing.append(f"{line['name']} ({ordered - units} de {ordered})")
         order.status = "received"
-    await _reply(update, texts.ORDER_RECEIVED)
+        await session.delete(pending)
+        following = await oldest_sent_order(session, store.id, exclude_id=order.id)
+        next_delivery = following.delivery_date if following is not None else None
+    await _remove_buttons(update)
+    await _reply(update, texts.receipt_saved(missing, next_delivery))
+
+
+async def handle_cancel_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _answer_callback(update)
+    async with session_scope() as session:
+        store = await require_ready_store(update, session)
+        if store is None:
+            return
+        pending = await get_button_draft(update, session, store.id, KIND_RECEIPT)
+        if pending is None:
+            await _stale_button(update)
+            return
+        await session.delete(pending)
+    await _remove_buttons(update)
+    await _reply(update, texts.RECEIPT_CANCELLED)
 
 
 async def handle_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -999,17 +1209,23 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(handle_days, pattern=keyboards.DAYS_PATTERN))
     application.add_handler(CallbackQueryHandler(handle_confirm_logout, pattern=f"^{keyboards.CONFIRM_LOGOUT}$"))
     application.add_handler(CallbackQueryHandler(handle_keep_session, pattern=f"^{keyboards.KEEP_SESSION}$"))
-    application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=f"^{keyboards.CONFIRM_SALES}$"))
-    application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=f"^{keyboards.CANCEL_SALES}$"))
-    application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=f"^{keyboards.CONFIRM_STOCK}$"))
-    application.add_handler(CallbackQueryHandler(handle_cancel_stock, pattern=f"^{keyboards.CANCEL_STOCK}$"))
-    application.add_handler(CallbackQueryHandler(handle_send_order, pattern=f"^{keyboards.SEND_ORDER}$"))
-    application.add_handler(CallbackQueryHandler(handle_cancel_order, pattern=f"^{keyboards.CANCEL_ORDER}$"))
+    application.add_handler(CallbackQueryHandler(handle_confirm_sales, pattern=keyboards.draft_pattern(keyboards.CONFIRM_SALES)))
+    application.add_handler(CallbackQueryHandler(handle_cancel_sales, pattern=keyboards.draft_pattern(keyboards.CANCEL_SALES)))
+    application.add_handler(CallbackQueryHandler(handle_confirm_stock, pattern=keyboards.draft_pattern(keyboards.CONFIRM_STOCK)))
+    application.add_handler(CallbackQueryHandler(handle_cancel_stock, pattern=keyboards.draft_pattern(keyboards.CANCEL_STOCK)))
+    application.add_handler(CallbackQueryHandler(handle_send_order, pattern=keyboards.draft_pattern(keyboards.SEND_ORDER)))
+    application.add_handler(CallbackQueryHandler(handle_cancel_order, pattern=keyboards.draft_pattern(keyboards.CANCEL_ORDER)))
+    application.add_handler(
+        CallbackQueryHandler(handle_confirm_receipt, pattern=keyboards.draft_pattern(keyboards.CONFIRM_RECEIPT))
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_cancel_receipt, pattern=keyboards.draft_pattern(keyboards.CANCEL_RECEIPT))
+    )
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
-    # Grupo 1: texto de una tienda ya vinculada (ventas o corrección de conteo).
+    # Grupo 1: texto de una tienda ya vinculada (ventas, cambios al pedido o correcciones).
     application.add_handler(MessageHandler(text_only, handle_text), group=1)
 
     # Grupo 2: si nadie lo entendió, respuesta amable con ejemplos.

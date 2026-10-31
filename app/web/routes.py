@@ -19,10 +19,21 @@ from app.inventory.engine import (
     local_date,
     parse_visit_weekdays,
 )
-from app.models import Product, Receipt, Sale, StockCount, Store, SuggestedOrder, SuggestedOrderItem
+from app.models import (
+    Product,
+    Receipt,
+    Sale,
+    StockCount,
+    Store,
+    StoreRequest,
+    SuggestedOrder,
+    SuggestedOrderItem,
+)
+from app.onboarding import DecisionError, approve_request, notify_decision, parse_approval, parse_rejection, reject_request
 from app.inventory.orders import cap_to_available, order_total, to_order_lines
 from app.phones import format_phone, normalize_phone
 from app.web import aggregations, catalog, formatting
+from app.web.store_forms import PAYMENT_METHODS, parse_store_form
 from app.web.auth import (
     authenticate,
     client_ip,
@@ -47,6 +58,9 @@ templates.env.globals["static_version"] = int(max(f.stat().st_mtime for f in STA
 templates.env.filters["day"] = day_label
 templates.env.filters["deadline"] = deadline_label
 templates.env.filters["phone"] = format_phone
+templates.env.globals["payment_methods"] = PAYMENT_METHODS
+templates.env.globals["weekday_names"] = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+templates.env.globals["parse_days"] = parse_visit_weekdays
 
 router = APIRouter(prefix="/panel")
 
@@ -169,6 +183,13 @@ async def stores_list(
     distributor_id: int = Depends(require_distributor),
     session: AsyncSession = Depends(get_session),
 ):
+    return await _stores_page(request, session, distributor_id)
+
+
+async def _stores_page(
+    request: Request, session: AsyncSession, distributor_id: int, create_errors: list[str] | None = None,
+    form: dict | None = None, route_days: list[int] | None = None, status_code: int = status.HTTP_200_OK,
+):
     stores = await _distributor_stores(session, distributor_id)
     analyses = {analysis.store_id: analysis for analysis in await _analyses(session, stores)}
     rows = []
@@ -184,7 +205,41 @@ async def stores_list(
                 "order_total": analysis.order_total if analysis else Decimal("0"),
             }
         )
-    return templates.TemplateResponse(request, "stores.html", {"active": "stores", "rows": rows})
+    context = {
+        "active": "stores",
+        "rows": rows,
+        "create_errors": create_errors or [],
+        "form": form or {},
+        "route_days": route_days or [],
+    }
+    return templates.TemplateResponse(request, "stores.html", context, status_code=status_code)
+
+
+@router.post("/tiendas/nueva", response_class=HTMLResponse)
+async def store_create(
+    request: Request,
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    """Tienda creada a mano por el distribuidor. El tendero entra al bot con el celular que se registre."""
+    raw = await request.form()
+    form = {key: str(value) for key, value in raw.items()}
+    route_days = [str(day) for day in raw.getlist("route_days")]
+    data, errors = parse_store_form(form, route_days, with_phone=True)
+    if not errors and data["owner_phone"]:
+        taken = await session.scalar(select(Store.name).where(Store.owner_phone == data["owner_phone"]))
+        if taken is not None:
+            errors.append(f"Ese celular ya está registrado en la tienda {taken}.")
+    if errors:
+        return await _stores_page(
+            request, session, distributor_id, errors, form, [int(d) for d in route_days if d.isdigit()],
+            status.HTTP_400_BAD_REQUEST,
+        )
+    days = ",".join(str(day) for day in data.pop("route_days"))
+    store = Store(distributor_id=distributor_id, route_weekdays=days, visit_weekdays=days, **data)
+    session.add(store)
+    await session.commit()
+    return RedirectResponse(f"/panel/tiendas/{store.id}?datos=creada", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/tiendas/{store_id}", response_class=HTMLResponse)
@@ -198,6 +253,13 @@ async def store_detail(
     # Tienda inexistente o de otro distribuidor: 404 en ambos casos (no revelar que existe).
     if store is None or store.distributor_id != distributor_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return await _store_detail_page(request, session, distributor_id, store)
+
+
+async def _store_detail_page(
+    request: Request, session: AsyncSession, distributor_id: int, store: Store,
+    data_errors: list[str] | None = None, form: dict | None = None, status_code: int = status.HTTP_200_OK,
+):
     analysis = await load_store_analysis(session, store.id)
     if analysis is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -247,8 +309,54 @@ async def store_detail(
         "sent_orders": await _sent_orders(session, distributor_id, store.id),
         "phone_message": PHONE_MESSAGES.get(request.query_params.get("celular", "")),
         "phone_error": PHONE_ERRORS.get(request.query_params.get("celular", "")),
+        "data_message": DATA_MESSAGES.get(request.query_params.get("datos", "")),
+        "data_errors": data_errors or [],
+        "form": form,
     }
-    return templates.TemplateResponse(request, "store_detail.html", context)
+    return templates.TemplateResponse(request, "store_detail.html", context, status_code=status_code)
+
+
+DATA_MESSAGES = {
+    "creada": "Tienda creada. Registra su celular para que el tendero pueda entrar al bot.",
+    "ok": "Datos guardados.",
+    "dias": "Datos guardados. Como cambió la ruta, el bot le preguntará al tendero sus días de entrega otra vez.",
+}
+
+
+@router.post("/tiendas/{store_id}/datos", response_class=HTMLResponse)
+async def store_data(
+    store_id: int,
+    request: Request,
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    """Datos de la tienda y días de ruta. El celular de acceso se cambia aparte (cierra la sesión)."""
+    store = await session.get(Store, store_id)
+    if store is None or store.distributor_id != distributor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    raw = await request.form()
+    form = {key: str(value) for key, value in raw.items()}
+    form["route_days"] = [int(d) for d in raw.getlist("route_days") if str(d).isdigit()]
+    data, errors = parse_store_form(form, [str(d) for d in raw.getlist("route_days")], with_phone=False)
+    if errors:
+        return await _store_detail_page(request, session, distributor_id, store, errors, form, status.HTTP_400_BAD_REQUEST)
+    route_days = data.pop("route_days")
+    for field, value in data.items():
+        setattr(store, field, value)
+    store.route_weekdays = ",".join(str(day) for day in route_days)
+    message = "ok"
+    kept = [day for day in parse_visit_weekdays(store.visit_weekdays) if day in route_days]
+    if store.delivery_days_set_at is None:
+        store.visit_weekdays = store.route_weekdays
+    elif kept:
+        store.visit_weekdays = ",".join(str(day) for day in kept)
+    else:
+        # Ninguno de sus días de entrega sigue en la ruta: el tendero vuelve a escoger en el bot.
+        store.visit_weekdays = store.route_weekdays
+        store.delivery_days_set_at = None
+        message = "dias"
+    await session.commit()
+    return RedirectResponse(f"/panel/tiendas/{store.id}?datos={message}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 PHONE_MESSAGES = {
@@ -302,6 +410,115 @@ async def demand(
     return templates.TemplateResponse(
         request, "demand.html", {"active": "demand", "rows": rows, "stores_total": len(stores)}
     )
+
+
+# --- Solicitudes de acceso ---------------------------------------------------
+
+REQUEST_MESSAGES = {
+    "aprobada": "Solicitud aprobada: la tienda quedó creada y se le avisó al tendero.",
+    "rechazada": "Solicitud rechazada. Se le avisó al tendero con el motivo.",
+}
+RECENT_DECISIONS = 20
+
+
+async def _requests_page(
+    request: Request, session: AsyncSession, distributor_id: int, error_for: int | None = None,
+    error: str | None = None, status_code: int = status.HTTP_200_OK,
+):
+    pending = (
+        await session.scalars(
+            select(StoreRequest)
+            .where(StoreRequest.distributor_id == distributor_id, StoreRequest.status == "pending")
+            .order_by(StoreRequest.created_at)
+        )
+    ).all()
+    decided = (
+        await session.scalars(
+            select(StoreRequest)
+            .where(StoreRequest.distributor_id == distributor_id, StoreRequest.status != "pending")
+            .order_by(StoreRequest.decided_at.desc())
+            .limit(RECENT_DECISIONS)
+        )
+    ).all()
+    context = {
+        "active": "requests",
+        "pending": pending,
+        "decided": decided,
+        "message": REQUEST_MESSAGES.get(request.query_params.get("ok", "")),
+        "error_for": error_for,
+        "error": error,
+    }
+    return templates.TemplateResponse(request, "requests.html", context, status_code=status_code)
+
+
+async def _pending_request(session: AsyncSession, distributor_id: int, request_id: int) -> StoreRequest | None:
+    store_request = await session.get(StoreRequest, request_id)
+    if store_request is None or store_request.distributor_id != distributor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return store_request if store_request.status == "pending" else None
+
+
+def _notify_request(request: Request, background: BackgroundTasks, request_id: int) -> None:
+    telegram_app = getattr(request.app.state, "telegram_app", None)
+    if telegram_app is not None:
+        background.add_task(notify_decision, telegram_app.bot, request_id)
+
+
+@router.get("/solicitudes", response_class=HTMLResponse)
+async def requests_list(
+    request: Request,
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    return await _requests_page(request, session, distributor_id)
+
+
+@router.post("/solicitudes/{request_id}/aprobar", response_class=HTMLResponse)
+async def request_approve(
+    request_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    store_request = await _pending_request(session, distributor_id, request_id)
+    if store_request is None:  # ya la decidió (doble clic u otra pestaña)
+        return RedirectResponse("/panel/solicitudes", status_code=status.HTTP_303_SEE_OTHER)
+    raw = await request.form()
+    try:
+        approval = parse_approval([str(d) for d in raw.getlist("route_days")], str(raw.get("lead_time_days", "")))
+        await approve_request(session, store_request, approval)
+    except DecisionError as exc:
+        await session.rollback()
+        return await _requests_page(
+            request, session, distributor_id, request_id, str(exc), status.HTTP_400_BAD_REQUEST
+        )
+    await session.commit()
+    _notify_request(request, background, request_id)
+    return RedirectResponse("/panel/solicitudes?ok=aprobada", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/solicitudes/{request_id}/rechazar", response_class=HTMLResponse)
+async def request_reject(
+    request_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    reason: str = Form(""),
+    distributor_id: int = Depends(require_distributor),
+    session: AsyncSession = Depends(get_session),
+):
+    store_request = await _pending_request(session, distributor_id, request_id)
+    if store_request is None:
+        return RedirectResponse("/panel/solicitudes", status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        reject_request(store_request, parse_rejection(reason))
+    except DecisionError as exc:
+        return await _requests_page(
+            request, session, distributor_id, request_id, str(exc), status.HTTP_400_BAD_REQUEST
+        )
+    await session.commit()
+    _notify_request(request, background, request_id)
+    return RedirectResponse("/panel/solicitudes?ok=rechazada", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # --- Productos del distribuidor ----------------------------------------------
@@ -489,8 +706,9 @@ async def live_version(
     distributor_id: int = Depends(require_distributor),
     session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
-    """Huella de los datos que llegan desde Telegram. El panel la consulta cada pocos segundos
-    y se actualiza solo cuando cambia (venta, conteo, recibo, pedido o tienda vinculada)."""
+    """Huella de los datos que llegan desde Telegram y de la página pública. El panel la consulta
+    cada pocos segundos y se actualiza solo cuando cambia (venta, conteo, recibo, pedido, tienda
+    vinculada o solicitud de acceso). También trae cuántas solicitudes esperan respuesta."""
     store_ids = select(Store.id).where(Store.distributor_id == distributor_id).scalar_subquery()
     row = (
         await session.execute(
@@ -509,7 +727,19 @@ async def live_version(
                 select(func.count(Store.id))
                 .where(Store.distributor_id == distributor_id, Store.delivery_days_set_at.is_not(None))
                 .scalar_subquery(),
+                select(func.coalesce(func.max(StoreRequest.id), 0))
+                .where(StoreRequest.distributor_id == distributor_id)
+                .scalar_subquery(),
+                select(func.count(StoreRequest.id))
+                .where(StoreRequest.distributor_id == distributor_id, StoreRequest.status == "pending")
+                .scalar_subquery(),
+                select(func.count(StoreRequest.id))
+                .where(StoreRequest.distributor_id == distributor_id, StoreRequest.telegram_chat_id.is_not(None))
+                .scalar_subquery(),
             )
         )
     ).one()
-    return JSONResponse({"version": "-".join(str(value) for value in row)}, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        {"version": "-".join(str(value) for value in row), "pending_requests": row[-2]},
+        headers={"Cache-Control": "no-store"},
+    )

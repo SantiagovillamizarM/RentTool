@@ -19,17 +19,20 @@ El tendero no lleva inventario porque le toma más tiempo del que tiene. Por eso
 | Manda una foto del estante | Estima cuántas unidades hay de cada producto, avisa que es una estimación y deja corregir antes de guardar. |
 | Escribe `/stock` | Muestra el inventario actual. |
 | Escribe `/alertas` | Dice qué se va a acabar y qué no se está vendiendo. |
+| Entra a la página de TenderoBot y llena **Pedir acceso** | Su distribuidor revisa la solicitud en el panel (datos y si la ruta llega a la tienda) y la aprueba o la rechaza con un motivo. Si el tendero ya abrió el bot, la respuesta le llega por Telegram; si no, por correo. |
 | Escribe `/start` y toca 📱 Compartir mi número | Telegram le manda al bot el número verificado de esa cuenta (no se puede escribir otro). Si es el celular que el distribuidor registró para la tienda, entra. Sin códigos ni contraseñas. |
 | Vincula su tienda por primera vez | Le pregunta qué días quiere recibir la mercancía, entre los días en que el proveedor pasa por su barrio. |
 | Escribe `/pedido` | Sugiere el pedido para la próxima entrega, en cajas, con el motivo de cada producto, el total en pesos y la hora límite para enviarlo. |
 | Responde *"quita el arroz"* o *"ponle 2 cajas más de coca"* (por texto o audio) | Ajusta el pedido. El tendero tiene la última palabra; el camión lleva solo lo que él envió. |
 | No ha pedido y se acerca la hora límite | Le manda un recordatorio automático: *"El jueves te llega mercancía. Tienes hasta hoy a las 6 p. m."* |
-| Escribe `/recibido` | Suma la mercancía del pedido al inventario. |
+| Escribe `/recibido` | Muestra lo que traía el pedido para confirmarlo. Si algo llegó incompleto, el tendero escribe lo que llegó de verdad (*"coca litro 8"*) y solo eso se suma al inventario. |
 | Escribe `/catalogo` | Muestra lo que tiene su proveedor, con precios y lo que está agotado. |
 | Escribe `/salir` | Cierra la sesión de la tienda en ese chat (pide confirmación). Los datos se conservan; para volver a entrar basta con compartir el número otra vez. Si entra otra cuenta de Telegram, se le pide su propia autorización de datos. |
 | No usa el bot en 24 horas | Le avisa, de día, que la sesión sigue abierta, con botones para cerrarla o seguir. Un solo aviso hasta que vuelva a usar el bot. |
 
-El distribuidor tiene un **panel web** (`/panel`) con el resumen de sus tiendas, las alertas de cada una, el gráfico de ventas, la clasificación ABC y la demanda agregada de la próxima semana.
+La raíz del sitio (`/`) es la **página pública**: explica qué hace TenderoBot y tiene el formulario para pedir acceso.
+
+El distribuidor tiene un **panel web** (`/panel`) con las **solicitudes** de tenderos nuevos (aprobar escogiendo los días de ruta, o rechazar con motivo), sus tiendas (también puede agregarlas a mano y editar sus datos), el resumen de sus tiendas, las alertas de cada una, el gráfico de ventas, la clasificación ABC y la demanda agregada de la próxima semana.
 
 En **Productos** maneja su catálogo: agrega productos, cambia precios, actualiza cuántas unidades tiene y desactiva lo que ya no vende. Al hacer clic en un producto ve qué días de la semana se vende más (últimas 8 semanas), en todas sus tiendas o en una sola, y puede ampliar el gráfico a pantalla completa.
 - El bot solo sugiere y deja pedir lo que el distribuidor tiene, en cajas completas. Cuando el tendero envía un pedido, esas unidades se descuentan.
@@ -109,7 +112,7 @@ uvicorn app.main:app --reload
 
 Con `BOT_MODE=polling` el bot funciona desde tu computador, sin desplegar nada.
 
-- **Bot:** primero registra tu celular en el panel (Tiendas → una tienda → Acceso al bot). Luego abre tu bot en Telegram, escribe `/start` y toca 📱 Compartir mi número.
+- **Bot:** pide acceso en http://localhost:8000 con tu celular y apruébalo en el panel (Solicitudes), o registra tu celular directamente (Tiendas → una tienda → Acceso al bot). Luego abre tu bot en Telegram, escribe `/start` y toca 📱 Compartir mi número.
 - **Datos reales:** el seed no inventa ventas, conteos ni pedidos. Todo lo que muestra el panel llega desde Telegram, y el panel se actualiza solo (indicador "En vivo"). Volver a correr el seed borra los datos del distribuidor, también los celulares registrados.
 - **Panel:** entra a http://localhost:8000/panel con `demo@demo.co` y la contraseña de `DEMO_PASSWORD`.
 - **Pruebas:** `python -m pytest`
@@ -127,6 +130,7 @@ Con `BOT_MODE=polling` el bot funciona desde tu computador, sin desplegar nada.
 | `GROK_MODEL` | Por defecto `grok-4.20-0309-non-reasoning` |
 | `SESSION_SECRET` | Firma de la sesión del panel |
 | `DEMO_PASSWORD` | Contraseña del usuario de prueba del panel |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Correo de respaldo para tenderos que no abren el bot (gratis con Gmail y una contraseña de aplicación). Vacíos = no se mandan correos. |
 
 Las claves van solo en `.env`, que está en `.gitignore`. Nunca se suben al repositorio.
 

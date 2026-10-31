@@ -14,8 +14,34 @@ CONFIRM_STOCK = "stock:confirm"
 CANCEL_STOCK = "stock:cancel"
 SEND_ORDER = "order:send"
 CANCEL_ORDER = "order:cancel"
+CONFIRM_RECEIPT = "receipt:confirm"
+CANCEL_RECEIPT = "receipt:cancel"
 CONFIRM_LOGOUT = "logout:confirm"
 KEEP_SESSION = "logout:keep"
+
+
+def draft_pattern(action: str) -> str:
+    """Botones de un borrador: "<acción>:<id del borrador>". Sin id = botón de antes de este cambio."""
+    return rf"^{action}(:\d+)?$"
+
+
+def draft_id(data: str | None) -> int | None:
+    """'sales:confirm:42' -> 42. Un botón sin id no corresponde a ningún borrador vigente."""
+    parts = (data or "").split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        return None
+    return int(parts[2])
+
+
+def _confirm_cancel(confirm_label: str, confirm: str, cancel: str, pending_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(confirm_label, callback_data=f"{confirm}:{pending_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data=f"{cancel}:{pending_id}"),
+            ]
+        ]
+    )
 
 
 def share_phone_keyboard() -> ReplyKeyboardMarkup:
@@ -42,26 +68,16 @@ def consent_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def confirm_sales_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("✅ Confirmar", callback_data=CONFIRM_SALES),
-                InlineKeyboardButton("❌ Cancelar", callback_data=CANCEL_SALES),
-            ]
-        ]
-    )
+def confirm_sales_keyboard(pending_id: int) -> InlineKeyboardMarkup:
+    return _confirm_cancel("✅ Confirmar", CONFIRM_SALES, CANCEL_SALES, pending_id)
 
 
-def confirm_stock_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("✅ Confirmar", callback_data=CONFIRM_STOCK),
-                InlineKeyboardButton("❌ Cancelar", callback_data=CANCEL_STOCK),
-            ]
-        ]
-    )
+def confirm_stock_keyboard(pending_id: int) -> InlineKeyboardMarkup:
+    return _confirm_cancel("✅ Confirmar", CONFIRM_STOCK, CANCEL_STOCK, pending_id)
+
+
+def confirm_receipt_keyboard(pending_id: int) -> InlineKeyboardMarkup:
+    return _confirm_cancel("✅ Llegó así", CONFIRM_RECEIPT, CANCEL_RECEIPT, pending_id)
 
 
 def logout_keyboard() -> InlineKeyboardMarkup:
@@ -75,15 +91,8 @@ def logout_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def order_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("✅ Enviar al distribuidor", callback_data=SEND_ORDER),
-                InlineKeyboardButton("❌ Cancelar", callback_data=CANCEL_ORDER),
-            ]
-        ]
-    )
+def order_keyboard(pending_id: int) -> InlineKeyboardMarkup:
+    return _confirm_cancel("✅ Enviar al distribuidor", SEND_ORDER, CANCEL_ORDER, pending_id)
 
 
 # Días de entrega: la selección viaja en el callback ("days:<días marcados>:<acción>"),

@@ -39,11 +39,15 @@ def unlinked(monkeypatch):
     async def no_store(session, chat_id):
         return None
 
+    async def no_request(session, chat_id):
+        return False
+
     async def record(update, text, reply_markup=None):
         replies.append(text)
 
     monkeypatch.setattr(handlers, "session_scope", fake_scope)
     monkeypatch.setattr(handlers, "get_store_by_chat", no_store)
+    monkeypatch.setattr(handlers, "has_request_in_review", no_request)
     monkeypatch.setattr(handlers, "_reply", record)
     return replies
 
@@ -397,7 +401,7 @@ async def test_forwarded_contact_of_someone_else_is_rejected(monkeypatch):
 async def test_unregistered_phone_cannot_enter(monkeypatch):
     replies = login_with_phone(monkeypatch, None)
     await handlers.handle_contact(own_phone("+57 311 000 0000"), None)
-    assert replies == [texts.PHONE_NOT_REGISTERED]
+    assert replies == [texts.phone_not_registered(handlers.request_page_url())]
 
 
 @pytest.mark.asyncio

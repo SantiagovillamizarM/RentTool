@@ -40,13 +40,23 @@ body {
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  background: transparent;
+  position: relative;
+}
+
+/* Fondo en una capa fija aparte: se compone una vez y el scroll no lo repinta. */
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
     radial-gradient(1100px 620px at 85% -12%, rgba(27, 63, 134, 0.55), transparent 62%),
     radial-gradient(760px 520px at 8% -6%, rgba(246, 190, 69, 0.11), transparent 60%),
     radial-gradient(900px 700px at 50% 120%, rgba(10, 42, 102, 0.35), transparent 60%),
     var(--bg);
-  background-attachment: fixed;
-  position: relative;
+  transform: translateZ(0);
 }
 
 /* Cuadrícula tenue que se desvanece hacia abajo */
@@ -311,13 +321,11 @@ button.primary:hover,
 
 .card {
   position: relative;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)), rgba(6, 14, 32, 0.62);
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
   padding: 1.5rem;
   margin-top: 1.25rem;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 60px -36px rgba(0, 0, 0, 0.85);
 }
 .card-head {
@@ -877,4 +885,299 @@ select option { background: #0b1630; color: var(--text); }
   .sales-chart { height: 220px; }
   select { min-width: 0; width: 100%; }
   .select-label { width: 100%; }
+}
+
+/* ---------------------------------------------------------------- Formularios (extras) */
+
+input[type="radio"] { accent-color: var(--amber); padding: 0; margin: 0; }
+input[type="checkbox"] { accent-color: var(--amber); }
+textarea {
+  font: inherit;
+  color: var(--text);
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--stroke-2);
+  background: rgba(3, 9, 20, 0.55);
+  resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 4px rgba(246, 190, 69, 0.15); }
+.form-grid h3 { margin: 0; font-size: 1rem; }
+.form-grid .alert { margin: 0; }
+.hint { font-weight: 400; color: var(--faint); font-size: 0.78rem; }
+fieldset { border: none; margin: 0; padding: 0; min-width: 0; }
+legend { padding: 0; margin-bottom: 0.5rem; font-weight: 550; font-size: 0.85rem; color: var(--muted); }
+
+/* Días de la semana como fichas marcables */
+.day-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.form-grid label.day-option,
+.day-option { position: relative; flex-direction: row; display: inline-flex; cursor: pointer; }
+.day-option input { position: absolute; opacity: 0; pointer-events: none; }
+.day-option span {
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--stroke-2);
+  background: var(--glass);
+  color: var(--muted);
+  font-weight: 550;
+  font-size: 0.85rem;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.day-option input:checked + span { background: rgba(246, 190, 69, 0.18); border-color: rgba(246, 190, 69, 0.6); color: var(--amber); }
+.day-option input:focus-visible + span { box-shadow: 0 0 0 4px rgba(246, 190, 69, 0.2); }
+
+/* Opciones de una sola respuesta (forma de pago) */
+.choice { display: flex; flex-direction: column; gap: 0.5rem; }
+.form-grid label.choice-option,
+.choice-option { flex-direction: row; display: flex; align-items: center; gap: 0.55rem; color: var(--text); font-weight: 500; cursor: pointer; }
+
+/* Tarjeta plegable (agregar tienda, datos de la tienda) */
+.collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+.collapsible > summary::-webkit-details-marker { display: none; }
+.collapsible > summary > span:first-child::before { content: "+ "; color: var(--amber); }
+.collapsible[open] > summary > span:first-child::before { content: "\2212  "; }
+.collapsible[open] > summary { margin-bottom: 1.25rem; }
+
+/* Contador de solicitudes en el menú */
+.menu-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  margin-left: 0.25rem;
+  border-radius: 999px;
+  background: var(--amber);
+  color: var(--navy);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.menu-count[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- Solicitudes */
+
+.request-card h2 { margin: 0; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.9rem 1.25rem;
+  margin: 0 0 1.5rem;
+}
+.facts dt { color: var(--faint); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.facts dd { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
+.decision { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.5rem; border-top: 1px solid var(--stroke); padding-top: 1.25rem; }
+.decision .form-grid { align-content: start; }
+
+/* ---------------------------------------------------------------- Página pública */
+
+.site-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 3rem; }
+.site-nav { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+.site-nav a { color: var(--muted); padding: 0.45rem 0.85rem; border-radius: 999px; font-weight: 500; }
+.site-nav a:hover { color: var(--text); background: var(--glass-2); }
+.site-nav .site-login { color: var(--text); border: 1px solid var(--stroke-2); }
+
+.hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 3rem; align-items: center; margin-bottom: 5rem; }
+.hero h1 {
+  font-size: clamp(2.4rem, 5.4vw, 4rem);
+  line-height: 1.02;
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  margin: 1rem 0 0;
+}
+.hero h1 .accent { color: var(--amber); font-family: var(--serif); font-style: italic; font-weight: 400; }
+.hero-copy > p { color: var(--muted); font-size: 1.08rem; max-width: 52ch; margin: 1.25rem 0 0; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 2rem; }
+.hero-copy > p.hero-note { color: var(--faint); font-size: 0.85rem; }
+
+.chat-mock {
+  border-radius: 28px;
+  padding: 1rem;
+  background: linear-gradient(180deg, rgba(10, 42, 102, 0.55), rgba(4, 28, 75, 0.35));
+  border: 1px solid var(--stroke-2);
+  box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+.chat-top { display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0.25rem 0.75rem; border-bottom: 1px solid var(--stroke); }
+.chat-top img { width: 36px; height: 36px; border-radius: 999px; }
+.chat-top span { display: block; color: var(--ok); font-size: 0.75rem; }
+.bubble { max-width: 85%; padding: 0.6rem 0.85rem; border-radius: 16px; line-height: 1.45; }
+.bubble.me { align-self: flex-end; background: rgba(246, 190, 69, 0.18); border: 1px solid rgba(246, 190, 69, 0.3); border-bottom-right-radius: 4px; }
+.bubble.bot { align-self: flex-start; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--stroke); border-bottom-left-radius: 4px; }
+.bubble-buttons { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.55rem; }
+.bubble-buttons span { flex: 1; text-align: center; padding: 0.35rem 0.6rem; border-radius: 10px; background: rgba(255, 255, 255, 0.08); font-size: 0.8rem; white-space: nowrap; }
+
+.landing-section { margin-bottom: 5rem; scroll-margin-top: 1.5rem; }
+.landing-section h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); letter-spacing: -0.035em; line-height: 1.1; margin: 0.85rem 0 1.75rem; }
+.landing-section h2 .accent { color: var(--amber); font-family: var(--serif); font-style: italic; font-weight: 400; }
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.step { padding: 1.4rem; border-radius: var(--radius); border: 1px solid var(--stroke); background: var(--glass); }
+.step svg { width: 26px; height: 26px; color: var(--amber); }
+.step h3 { font-size: 1.05rem; margin: 0.9rem 0 0.4rem; }
+.step p { color: var(--muted); margin: 0; font-size: 0.92rem; }
+
+.benefits { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 2rem; align-items: start; }
+.benefit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.benefit-list li { padding: 1rem 1.2rem; border-radius: var(--radius-sm); border: 1px solid var(--stroke); background: var(--glass); color: var(--muted); }
+.benefit-list strong { color: var(--text); }
+
+.request-section { display: grid; grid-template-columns: 0.75fr 1.25fr; gap: 2.5rem; align-items: start; }
+.mini-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.85rem; color: var(--muted); }
+.mini-steps strong { color: var(--text); }
+.request-form .location { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.form-grid label.consent { flex-direction: row; align-items: flex-start; gap: 0.7rem; font-weight: 400; font-size: 0.85rem; line-height: 1.5; }
+.consent input { margin-top: 0.2rem; flex: none; width: 18px; height: 18px; }
+.form-grid label.trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+.distributors { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 2rem; border-radius: var(--radius); border: 1px solid var(--stroke); background: linear-gradient(135deg, rgba(27, 63, 134, 0.35), rgba(255, 255, 255, 0.02)); }
+.distributors p { color: var(--muted); max-width: 60ch; margin: 0; }
+.distributors h2 { margin-bottom: 0.75rem; }
+
+.site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; color: var(--faint); font-size: 0.82rem; border-top: 1px solid var(--stroke); padding-top: 1.5rem; }
+
+.sent-card { max-width: 640px; margin: 2rem auto; padding: 2rem; }
+.sent-card h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); letter-spacing: -0.04em; line-height: 1.1; margin: 1rem 0 0.75rem; }
+.sent-card h1 .accent { color: var(--amber); font-family: var(--serif); font-style: italic; font-weight: 400; }
+.sent-card > p { color: var(--muted); }
+.sent-card .mini-steps { margin: 1.25rem 0 1.75rem; }
+
+@media (max-width: 900px) {
+  .hero, .benefits, .request-section, .decision { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .site-header { margin-bottom: 2rem; }
+  .site-nav a:not(.site-login) { display: none; }
+  .hero { gap: 2rem; margin-bottom: 3.5rem; }
+  .steps { grid-template-columns: 1fr; }
+  .landing-section { margin-bottom: 3.5rem; }
+  .distributors { padding: 1.25rem; }
+  .sent-card { padding: 1.25rem; margin: 0; }
+}
+
+/* ---------------------------------------------------------------- Movimiento
+   Solo se anima transform y opacity: el navegador lo hace en la GPU, a la frecuencia
+   de la pantalla (60, 120 o 144 Hz), sin recalcular el diseño de la página. */
+
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html { scroll-behavior: smooth; }
+
+/* Cambio de página: fundido suave (Chrome y Edge); la barra superior se queda quieta. */
+@view-transition { navigation: auto; }
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 0.3s; animation-timing-function: var(--ease-out); }
+.topbar { view-transition-name: topbar; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translate3d(0, 18px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes grow-x { from { transform: scaleX(0); } }
+@keyframes press { 50% { transform: scale(0.94); } }
+
+/* Entrada de la página: cada bloque sube y aparece, uno tras otro. */
+.page > :not(.kpis):not(.hero):not(.reveal),
+.kpis > *,
+.hero-copy > *,
+.login-hero > *,
+.login-card {
+  animation: rise 0.75s var(--ease-out) backwards;
+}
+.page > :nth-child(2):not(.kpis):not(.hero), .kpis > :nth-child(1), .hero-copy > :nth-child(2), .login-hero > :nth-child(3) { animation-delay: 0.06s; }
+.page > :nth-child(3):not(.kpis):not(.hero), .kpis > :nth-child(2), .hero-copy > :nth-child(3), .login-hero > :nth-child(4) { animation-delay: 0.12s; }
+.page > :nth-child(4):not(.kpis):not(.hero), .kpis > :nth-child(3), .hero-copy > :nth-child(4), .login-hero > :nth-child(5), .login-card { animation-delay: 0.18s; }
+.page > :nth-child(5):not(.kpis):not(.hero), .kpis > :nth-child(4), .hero-copy > :nth-child(5), .login-hero > :nth-child(6) { animation-delay: 0.24s; }
+.page > :nth-child(n + 6):not(.kpis):not(.hero) { animation-delay: 0.3s; }
+
+/* Chat de ejemplo de la página pública: los mensajes llegan como en una conversación. */
+.chat-mock { animation: rise 0.9s var(--ease-out) 0.1s backwards; }
+.chat-mock > * { animation: pop 0.5s var(--ease-spring) backwards; }
+.chat-mock > :nth-child(2) { animation-delay: 0.5s; }
+.chat-mock > :nth-child(3) { animation-delay: 1.1s; }
+.chat-mock > :nth-child(4) { animation-delay: 1.9s; }
+.chat-mock > :nth-child(5) { animation-delay: 2.5s; }
+
+/* Al hacer scroll: los bloques aparecen cuando entran a la pantalla (ver base.html). */
+.js .reveal {
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  transition: opacity 0.8s var(--ease-out), transform 0.8s var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+.js .reveal.in { opacity: 1; transform: none; }
+
+/* Las barras de los medidores se llenan al cargar. */
+.meter-fill { transform-origin: left center; animation: grow-x 1.1s var(--ease-out) 0.35s backwards; }
+
+/* Tarjetas pequeñas que se levantan un poco al pasar el mouse. */
+.kpi, .step, .benefit-list li, .feature {
+  transition: transform 0.4s var(--ease-out), border-color 0.3s, background 0.3s;
+}
+@media (hover: hover) {
+  .kpi:hover, .step:hover, .benefit-list li:hover { transform: translate3d(0, -4px, 0); border-color: var(--stroke-2); }
+  .feature:hover { transform: translate3d(0, -3px, 0); }
+}
+
+/* Botones: se hunden al presionarlos. */
+.btn, button.primary, .small-btn, .logout button, .icon-btn {
+  transition: transform 0.25s var(--ease-out), box-shadow 0.25s, background 0.2s, border-color 0.2s, color 0.2s;
+}
+.btn:active, button.primary:active, .small-btn:active, .logout button:active, .icon-btn:active {
+  transform: scale(0.96);
+  transition-duration: 0.08s;
+}
+.btn-arrow { transition: transform 0.35s var(--ease-spring); }
+.btn:hover .btn-arrow, button.primary:hover .btn-arrow { transform: translate3d(3px, 0, 0); }
+.row-link svg { transition: transform 0.3s var(--ease-out); }
+.row-link:hover svg { transform: translate3d(3px, 0, 0); }
+
+/* Menú, fichas de días y casillas. */
+.menu a { transition: color 0.2s, background 0.25s var(--ease-out); }
+.day-option span { transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.25s var(--ease-spring); }
+.day-option:active span { transform: scale(0.94); }
+.day-option input:checked + span { animation: press 0.3s var(--ease-spring); }
+.menu-count:not([hidden]) { animation: pop 0.4s var(--ease-spring) backwards; }
+
+/* Secciones plegables: el contenido se despliega en vez de saltar. */
+.collapsible[open] > :not(summary) { animation: rise 0.45s var(--ease-out) backwards; }
+.collapsible > summary { transition: color 0.2s; }
+.collapsible > summary:hover { color: var(--amber); }
+
+/* Avisos y mensajes. */
+.alert, .notice { animation: rise 0.5s var(--ease-out) backwards; }
+.live-toast:not([hidden]) { animation: pop 0.45s var(--ease-spring) backwards; }
+
+/* Recarga automática del panel (datos nuevos de Telegram): sin animación de entrada. */
+.no-intro .page > *, .no-intro .kpis > *, .no-intro .meter-fill, .no-intro .alert, .no-intro .notice { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+  .js .reveal { opacity: 1; transform: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }

@@ -198,6 +198,23 @@ def test_rounding_up_to_cases():
     assert (p.cases, p.units) == (2, 22)
 
 
+def test_units_in_transit_are_not_ordered_again():
+    # Necesidad 12 (6 al día, horizonte 2, sin stock). Ya vienen 12 en camino: no se pide nada.
+    def analyze(in_transit):
+        return analyze_store(
+            1, "3,4", 1, [product()], daily_sales(1, 6), [count(1, 0, days_ago=0)], [], NOW, in_transit=in_transit
+        )
+
+    p = analyze({1: 12}).products[0]
+    assert p.in_transit == 12
+    assert p.need == pytest.approx(0)
+    assert p.cases == 0
+    assert analyze({1: 12}).order_lines == []
+    # Si solo vienen 6, falta la mitad: 1 caja.
+    assert analyze({1: 6}).products[0].cases == 1
+    assert analyze({}).products[0].cases == 1
+
+
 def test_safety_stock_formula():
     sales = [SaleEvent(1, 10, Decimal("1000"), NOW - timedelta(days=d)) for d in range(0, 28, 2)]
     p = run([product()], sales=sales, counts=[count(1, 0, days_ago=0)]).products[0]

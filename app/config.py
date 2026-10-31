@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     bot_mode: str = "polling"
     session_secret: str = "dev-session-secret-change-me"
     demo_password: str = "demo1234"
+    # Correo de respaldo para tenderos que no abren el bot. Vacío = no se mandan correos.
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
 
     @field_validator("bot_mode")
     @classmethod

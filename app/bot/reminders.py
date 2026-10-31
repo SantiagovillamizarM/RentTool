@@ -5,7 +5,8 @@ un solo recordatorio por entrega (Store.last_reminder_for) y no se le avisa si y
 envió el pedido para esa entrega.
 
 En la misma tarea se avisa al tendero que su sesión sigue abierta cuando lleva mucho
-tiempo sin usar el bot, una sola vez por cada periodo de inactividad.
+tiempo sin usar el bot, una sola vez por cada periodo de inactividad, y se hace el
+seguimiento de las solicitudes de acceso (app.onboarding).
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from app.bot import keyboards, texts
 from app.db import SessionLocal
 from app.inventory.engine import COLOMBIA_TZ, DeliverySchedule, delivery_schedule
 from app.models import Store, SuggestedOrder
+from app.onboarding import send_request_followups
 
 REMINDER_HOUR = 9
 CHECK_INTERVAL_SECONDS = 600
@@ -125,6 +127,12 @@ async def reminder_loop(bot: Bot) -> None:
                 logger.info("Recordatorios de pedido enviados: %s", sent)
         except Exception:
             logger.exception("Falló la revisión de recordatorios")
+        try:
+            sent = await send_request_followups(bot)
+            if sent:
+                logger.info("Avisos de solicitudes de acceso enviados: %s", sent)
+        except Exception:
+            logger.exception("Falló la revisión de solicitudes de acceso")
         try:
             sent = await send_idle_notices(bot)
             if sent:

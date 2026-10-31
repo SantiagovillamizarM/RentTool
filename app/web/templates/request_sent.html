@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Solicitud enviada{% endblock %}
+{% block content %}
+<header class="site-header">
+  <a class="brand" href="/">
+    <img src="/panel/static/logo.png" alt="">
+    <span>TenderoBot<small>Para tiendas de barrio</small></span>
+  </a>
+</header>
+
+<section class="sent-card card">
+  <span class="eyebrow">Solicitud enviada</span>
+  <h1>¡Listo! Ahora <span class="accent">abre el bot.</span></h1>
+  <p>Tu distribuidor va a revisar tus datos. Para que te avisemos apenas te respondan, falta un paso:</p>
+  <ol class="mini-steps">
+    <li><strong>Abre TenderoBot en Telegram</strong>{% if not bot_link %}: búscalo como TenderoBot{% endif %}.</li>
+    <li><strong>Toca "Iniciar" y luego 📱 Compartir mi número.</strong> Usa el mismo celular que escribiste.</li>
+    <li><strong>Espera el mensaje</strong> con la respuesta. Ahí mismo empiezas a usarlo.</li>
+  </ol>
+  {% if bot_link %}
+  <a href="{{ bot_link }}" class="btn btn-primary" target="_blank" rel="noopener">Abrir TenderoBot en Telegram <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+  {% endif %}
+  <p class="muted small">Si no abres el bot, te escribimos al correo al día siguiente y cuando te respondan.</p>
+</section>
+{% endblock %}

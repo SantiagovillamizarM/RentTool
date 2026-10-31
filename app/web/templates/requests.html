@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% import "_store_fields.html" as fields %}
+{% block title %}Solicitudes{% endblock %}
+{% block content %}
+<header class="page-head">
+  <span class="eyebrow">Solicitudes</span>
+  <h1>Tenderos que <span class="accent">quieren entrar</span></h1>
+  <p>Llegan desde la página de TenderoBot. Revisa sus datos y si tu camión llega hasta la tienda. Al aprobar se crea la tienda y el tendero puede usar el bot; al rechazar le contamos el motivo.</p>
+</header>
+
+{% if message %}<p class="notice">{{ message }}</p>{% endif %}
+
+{% for r in pending %}
+<section class="card request-card" id="solicitud-{{ r.id }}">
+  <div class="card-head">
+    <div>
+      <h2>{{ r.store_name }}</h2>
+      <span class="muted small">{{ r.owner_name }} · pidió acceso el {{ r.created_at|local_dt }}</span>
+    </div>
+    {% if r.telegram_chat_id %}<span class="badge badge-ok">Abrió el bot</span>
+    {% else %}<span class="badge badge-muted" title="Se le avisará por correo">No ha abierto el bot</span>{% endif %}
+  </div>
+
+  <dl class="facts">
+    <div><dt>Cédula o NIT</dt><dd>{{ r.document_id }}</dd></div>
+    <div><dt>Celular</dt><dd>{{ r.phone|phone }}</dd></div>
+    <div><dt>Correo</dt><dd>{{ r.email }}</dd></div>
+    <div><dt>Dirección</dt><dd>{{ r.address }}, {{ r.neighborhood }}, {{ r.city }}
+      {% if r.latitude is not none %}<br><a href="https://www.openstreetmap.org/?mlat={{ r.latitude }}&amp;mlon={{ r.longitude }}#map=18/{{ r.latitude }}/{{ r.longitude }}" target="_blank" rel="noopener">Ver en el mapa</a>{% endif %}</dd></div>
+    <div><dt>Horario para recibir</dt><dd>{{ r.receiving_hours }}</dd></div>
+    <div><dt>Forma de pago</dt><dd>{{ payment_methods[r.payment_method] }}</dd></div>
+  </dl>
+
+  {% if error_for == r.id and error %}<p class="alert">{{ error }}</p>{% endif %}
+  <div class="decision">
+    <form method="post" action="/panel/solicitudes/{{ r.id }}/aprobar" class="form-grid">
+      <h3 class="wide">Aprobar</h3>
+      {{ fields.route_days_picker([], 1) }}
+      <div class="actions">
+        <button type="submit" class="primary">Aprobar y crear tienda <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+      </div>
+    </form>
+    <form method="post" action="/panel/solicitudes/{{ r.id }}/rechazar" class="form-grid">
+      <h3 class="wide">Rechazar</h3>
+      <label class="wide">Motivo (el tendero lo va a leer)
+        <textarea name="reason" maxlength="300" rows="3" placeholder="Por ejemplo: nuestra ruta aún no llega a tu barrio." required></textarea>
+      </label>
+      <div class="actions wide">
+        <button type="submit" class="btn btn-ghost">Rechazar solicitud</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% else %}
+<section class="card"><p class="empty">No hay solicitudes por revisar.</p></section>
+{% endfor %}
+
+{% if decided %}
+<section class="card">
+  <div class="card-head">
+    <h2>Ya respondidas</h2>
+    <span class="muted">Las últimas {{ decided|length }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Tienda</th><th>Respuesta</th><th>Fecha</th><th>Aviso al tendero</th><th></th></tr></thead>
+      <tbody>
+        {% for r in decided %}
+        <tr>
+          <td><strong>{{ r.store_name }}</strong><br><span class="muted small">{{ r.owner_name }}</span></td>
+          <td>{% if r.status == 'approved' %}<span class="badge badge-ok">Aprobada</span>
+              {% else %}<span class="badge badge-risk">Rechazada</span><br><span class="muted small">{{ r.rejection_reason }}</span>{% endif %}</td>
+          <td class="muted">{{ r.decided_at|local_dt }}</td>
+          <td>{% if r.decision_notified_at %}<span class="muted small">Enviado {{ 'por Telegram' if r.telegram_chat_id else 'por correo' }}</span>
+              {% else %}<span class="muted small">Pendiente</span>{% endif %}</td>
+          <td class="num">{% if r.store_id %}<a class="row-link" href="/panel/tiendas/{{ r.store_id }}">Ver tienda {{ icon.arrow() }}</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

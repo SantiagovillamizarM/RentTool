@@ -149,17 +149,34 @@ async def test_panel_without_session_redirects_to_login():
 
 
 @pytest.mark.asyncio
-async def test_root_redirects_to_panel_and_login():
+async def test_root_is_the_public_page_with_the_request_form():
+    from types import SimpleNamespace
+
+    from app.db import get_session
     from app.main import app
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        root = await client.get("/")
-        assert root.status_code == 303
-        assert root.headers["location"] == "/panel"
-        followed = await client.get("/", follow_redirects=True)
-        assert str(followed.url).endswith("/panel/login")
-        assert "Ingresar" in followed.text
+    class DistributorsSession:
+        async def execute(self, statement):
+            return SimpleNamespace(all=lambda: [SimpleNamespace(id=1, name="Distribuidora El Barrio")])
+
+    async def fake_session():
+        yield DistributorsSession()
+
+    app.dependency_overrides[get_session] = fake_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            root = await client.get("/")
+            assert root.status_code == 200
+            assert 'action="/solicitud"' in root.text
+            assert "Pedir acceso" in root.text
+            # Con un solo distribuidor no se le pregunta al tendero cuál es.
+            assert 'name="distributor_id"' not in root.text
+            sent = await client.get("/solicitud/enviada")
+            assert sent.status_code == 200
+            assert "abre el bot" in sent.text
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_rate_limiter_reports_seconds_left():

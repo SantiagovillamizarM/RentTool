@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
+{% import "_store_fields.html" as fields %}
 {% block title %}{{ store.name }}{% endblock %}
 {% block content %}
 <p class="crumb"><a href="/panel/tiendas">← Tiendas</a></p>
@@ -12,6 +13,8 @@
     <span class="chip">Pedido hasta <strong>{{ analysis.order_deadline|deadline }}</strong></span>
   </div>
 </header>
+
+{% if data_message %}<p class="notice">{{ data_message }}</p>{% endif %}
 
 <section class="card">
   <div class="card-head">
@@ -29,6 +32,30 @@
     </div>
   </form>
 </section>
+
+{% set v = form if form else {
+  "name": store.name, "owner_name": store.owner_name, "document_id": store.document_id, "email": store.email,
+  "city": store.city, "neighborhood": store.neighborhood, "address": store.address,
+  "receiving_hours": store.receiving_hours, "payment_method": store.payment_method,
+  "lead_time_days": store.lead_time_days,
+} %}
+<details class="card collapsible"{% if data_errors %} open{% endif %}>
+  <summary>
+    <span>Datos de la tienda</span>
+    <span class="muted small">
+      {{ [store.address, store.neighborhood, store.city]|select|join(', ') or 'Sin dirección' }}
+      {% if store.latitude is not none %} · <a href="https://www.openstreetmap.org/?mlat={{ store.latitude }}&amp;mlon={{ store.longitude }}#map=18/{{ store.latitude }}/{{ store.longitude }}" target="_blank" rel="noopener">Ver en el mapa</a>{% endif %}
+    </span>
+  </summary>
+  {% for error in data_errors %}<p class="alert">{{ error }}</p>{% endfor %}
+  <form method="post" action="/panel/tiendas/{{ store.id }}/datos" class="form-grid">
+    {{ fields.store_fields(v, form.route_days if form else parse_days(store.route_weekdays)) }}
+    <p class="wide muted small">Si quitas de la ruta los días en que el tendero recibe, el bot le pide escoger otra vez.</p>
+    <div class="actions wide">
+      <button type="submit" class="primary">Guardar datos <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </div>
+  </form>
+</details>
 
 <section class="card">
   <div class="card-head">

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -76,6 +77,16 @@ class Store(Base):
     # Último mensaje o botón del chat vinculado, y cuándo se le avisó que la sesión sigue abierta.
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     idle_notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Datos para despachar y facturar (llegan de la solicitud o los escribe el distribuidor).
+    document_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    neighborhood: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    receiving_hours: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="stores")
     sales: Mapped[list["Sale"]] = relationship(back_populates="store")
@@ -83,6 +94,58 @@ class Store(Base):
     receipts: Mapped[list["Receipt"]] = relationship(back_populates="store")
     suggested_orders: Mapped[list["SuggestedOrder"]] = relationship(back_populates="store")
     pending_actions: Mapped[list["PendingAction"]] = relationship(back_populates="store")
+
+
+class StoreRequest(Base):
+    """Solicitud de un tendero desde la página pública. El distribuidor la aprueba o la rechaza.
+
+    Si el tendero abre el bot y comparte su número, se guarda su chat para avisarle por Telegram;
+    si no, se le avisa por correo.
+    """
+
+    __tablename__ = "store_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_store_requests_status"),
+        CheckConstraint("payment_method IN ('contado', 'credito')", name="ck_store_requests_payment"),
+        Index("ix_store_requests_distributor_status", "distributor_id", "status"),
+        # Una sola solicitud en revisión por celular.
+        Index(
+            "uq_store_requests_pending_phone",
+            "phone",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    distributor_id: Mapped[int] = mapped_column(
+        ForeignKey("distributors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    store_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    owner_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    city: Mapped[str] = mapped_column(String(80), nullable=False)
+    neighborhood: Mapped[str] = mapped_column(String(120), nullable=False)
+    address: Mapped[str] = mapped_column(String(200), nullable=False)
+    receiving_hours: Mapped[str] = mapped_column(String(80), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id", ondelete="SET NULL"), nullable=True)
+    reminder_email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    distributor: Mapped[Distributor] = relationship()
 
 
 class StoreConsent(Base):

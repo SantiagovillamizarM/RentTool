@@ -11,16 +11,36 @@ ASK_LOGIN = (
     "Así compruebo que eres el dueño de la tienda, sin códigos ni contraseñas."
 )
 CONTACT_NOT_YOURS = "Ese no es tu número. Toca el botón 📱 Compartir mi número para mandar el tuyo."
-PHONE_NOT_REGISTERED = (
-    "Tu número no está registrado en ninguna tienda.\n"
-    "Pídele a tu distribuidor que lo registre y vuelve a tocar 📱 Compartir mi número."
-)
 PHONE_VERIFIED = "✅ Número verificado."
+REQUEST_IN_REVIEW = (
+    "📝 Tu solicitud está en revisión.\n\n"
+    "Tu distribuidor está revisando tus datos y si su camión llega hasta tu tienda. "
+    "Te aviso por aquí apenas te respondan. No tienes que hacer nada más."
+)
+
+
+def phone_not_registered(request_url: str = "") -> str:
+    text = "Tu número no está registrado en ninguna tienda."
+    if request_url:
+        return text + f"\n\nPide acceso en {request_url} y vuelve a tocar 📱 Compartir mi número."
+    return text + "\nPídele a tu distribuidor que lo registre y vuelve a tocar 📱 Compartir mi número."
+
+
+def request_approved(distributor: str, store_name: str) -> str:
+    return f"✅ ¡Buenas noticias! {distributor} aprobó tu tienda {store_name}. Ya puedes usar TenderoBot."
+
+
+def request_rejected(store_name: str, reason: str, request_url: str = "") -> str:
+    text = f"❌ Tu solicitud para {store_name} no fue aprobada.\nMotivo: {reason}"
+    if request_url:
+        text += f"\n\nSi lo puedes corregir, envía una solicitud nueva en {request_url}"
+    return text
 SESSION_MOVED = (
     "🔒 Se abrió la sesión de tu tienda en otra cuenta de Telegram con tu número, "
     "así que la cerré en este chat."
 )
 NOTHING_PENDING = "No hay nada por confirmar."
+STALE_BUTTON = "Ese mensaje ya no está vigente. Usa el último que te mandé."
 CANCELLED = "Listo, no guardé nada."
 SAVED_SALES = "Quedó registrado."
 SAVED_STOCK = "Quedó el conteo."
@@ -34,6 +54,8 @@ NO_ORDER = "No hay pedido para enviar. Revisa /stock o vuelve a intentar."
 NO_SENT_ORDER = "No hay un pedido enviado para marcar como recibido."
 ORDER_CANCELLED = "Listo, no envié el pedido. Cuando quieras, escribe /pedido."
 ORDER_RECEIVED = "Listo, registré la mercancía recibida."
+RECEIPT_CANCELLED = "Listo, no registré nada. Cuando te llegue el pedido, escribe /recibido."
+RECEIPT_NOT_IN_ORDER = "Ese producto no venía en el pedido. Escríbelo como aparece en la lista."
 HELP = (
     "Esto es lo que puedo hacer:\n\n"
     "🛒 Registrar ventas\n"
@@ -246,6 +268,43 @@ def order_sent(delivery, missed_deadline: bool, availability_notes: list[str] | 
         text = f"✅ Pedido enviado al distribuidor. Te llega el {day_label(delivery)}."
     if availability_notes:
         text += "\n\nAjusté según lo que tiene tu proveedor: " + ", ".join(availability_notes) + "."
+    return text
+
+
+def order_already_sent(delivery) -> str:
+    return (
+        f"Ya enviaste el pedido para el {day_label(delivery)}.\n"
+        "Cuando te llegue, escribe /recibido. Después te ayudo con el siguiente."
+    )
+
+
+def receipt_summary(lines: list[dict], delivery) -> str:
+    """Lo que trae el pedido, para que el tendero confirme lo que de verdad llegó."""
+    header = f"📦 Pedido del {day_label(delivery)}." if delivery else "📦 Tu pedido."
+    rows = [header + " ¿Llegó así?"]
+    for line in lines:
+        units, ordered = int(line["units"]), int(line["ordered"])
+        word = "unidad" if ordered == 1 else "unidades"
+        if units == ordered:
+            rows.append(f"• {line['name']}: {ordered} {word}")
+        else:
+            rows.append(f"• {line['name']}: llegaron {units} de {ordered} {word}")
+    rows.append("")
+    rows.append("Si algo llegó incompleto, escríbeme el producto y cuántas unidades llegaron.")
+    rows.append("Ejemplo: si de 12 Coca-Cola litro llegaron 8, escribe: coca litro 8")
+    rows.append("Si no llegó nada de un producto, escribe el producto y 0.")
+    return "\n".join(rows)
+
+
+def receipt_saved(missing: list[str], next_delivery=None) -> str:
+    text = ORDER_RECEIVED
+    if missing:
+        text += "\n\nNo llegó todo: " + ", ".join(missing) + "."
+    if next_delivery is not None:
+        text += (
+            f"\n\nTe queda otro pedido en camino para el {day_label(next_delivery)}. "
+            "Cuando llegue, escribe /recibido."
+        )
     return text
 
 

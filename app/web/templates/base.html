@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Panel{% endblock %} · TenderoBot</title>
+  <script>
+    // Antes de pintar: con JS los bloques de abajo aparecen al hacer scroll; en la recarga
+    // automática del panel no se repite la animación de entrada.
+    document.documentElement.classList.add("js");
+    try { if (sessionStorage.getItem("tenderobot-scroll") !== null) { document.documentElement.classList.add("no-intro"); } } catch (e) {}
+  </script>
   <link rel="icon" type="image/png" href="/panel/static/favicon.png?v={{ static_version }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,6 +27,7 @@
       <nav class="menu" aria-label="Secciones">
         <a href="/panel" class="{{ 'on' if active == 'overview' }}">Resumen</a>
         <a href="/panel/tiendas" class="{{ 'on' if active == 'stores' }}">Tiendas</a>
+        <a href="/panel/solicitudes" class="{{ 'on' if active == 'requests' }}">Solicitudes <span class="menu-count" id="requests-count" hidden></span></a>
         <a href="/panel/demanda" class="{{ 'on' if active == 'demand' }}">Demanda</a>
         <a href="/panel/productos" class="{{ 'on' if active == 'products' }}">Productos</a>
       </nav>
@@ -51,7 +58,7 @@
       var version = null;
       try {
         var y = sessionStorage.getItem("tenderobot-scroll");
-        if (y !== null) { sessionStorage.removeItem("tenderobot-scroll"); window.scrollTo(0, parseInt(y, 10)); }
+        if (y !== null) { sessionStorage.removeItem("tenderobot-scroll"); window.scrollTo({ top: parseInt(y, 10), behavior: "instant" }); }
       } catch (e) {}
 
       function reload() {
@@ -73,6 +80,9 @@
           .then(function (data) {
             pill.classList.remove("off");
             pill.querySelector(".live-text").textContent = "En vivo";
+            var count = document.getElementById("requests-count");
+            count.textContent = data.pending_requests;
+            count.hidden = !data.pending_requests;
             if (version === null) { version = data.version; return; }
             if (data.version === version) { return; }
             version = data.version;
@@ -90,6 +100,42 @@
     })();
   </script>
   {% endif %}
+  <script>
+    // Bloques que aparecen al entrar a la pantalla y números que cuentan hasta su valor.
+    (function () {
+      var reveals = document.querySelectorAll(".reveal");
+      if ("IntersectionObserver" in window) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) { entry.target.classList.add("in"); observer.unobserve(entry.target); }
+          });
+        }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+        reveals.forEach(function (el) { observer.observe(el); });
+      } else {
+        reveals.forEach(function (el) { el.classList.add("in"); });
+      }
+
+      var instant = document.documentElement.classList.contains("no-intro") ||
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      document.querySelectorAll("[data-count]").forEach(function (el) {
+        var target = Number(el.dataset.count) || 0;
+        var prefix = el.dataset.prefix || "";
+        function show(value) {
+          el.textContent = prefix + String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        }
+        if (instant || target === 0) { return; }
+        var start = null;
+        function step(now) {
+          if (start === null) { start = now; }
+          var progress = Math.min(1, (now - start) / 1100);
+          show(target * (1 - Math.pow(1 - progress, 4)));
+          if (progress < 1) { requestAnimationFrame(step); }
+        }
+        show(0);
+        requestAnimationFrame(step);
+      });
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
