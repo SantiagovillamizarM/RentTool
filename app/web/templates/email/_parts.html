@@ -1,0 +1,31 @@
+{#- Piezas de los correos: botón y caja de aviso, con estilos en línea. -#}
+{% macro button(url, label) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px;">
+  <tr>
+    <td style="border-radius:999px; background-color:#f6be45;">
+      <a href="{{ url }}" target="_blank" style="display:inline-block; padding:14px 28px; font-family:Arial,Helvetica,sans-serif; font-size:15px; font-weight:bold; color:#041c4b; text-decoration:none; border-radius:999px;">{{ label }} &rarr;</a>
+    </td>
+  </tr>
+</table>
+{%- endmacro %}
+
+{% macro note(text, color="#f4f7fc", border="#dde4f0", ink="#3a4661") -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 4px;">
+  <tr>
+    <td style="background-color:{{ color }}; border:1px solid {{ border }}; border-radius:14px; padding:14px 18px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:22px; color:{{ ink }};">{{ text }}</td>
+  </tr>
+</table>
+{%- endmacro %}
+
+{% macro steps(items) -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 4px;">
+  {% for item in items %}
+  <tr>
+    <td width="34" valign="top" style="padding:0 0 12px;">
+      <div style="width:24px; height:24px; line-height:24px; border-radius:999px; background-color:#041c4b; color:#f6be45; font-family:Arial,Helvetica,sans-serif; font-size:12px; font-weight:bold; text-align:center;">{{ loop.index }}</div>
+    </td>
+    <td valign="top" style="padding:2px 0 12px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:21px; color:#3a4661;">{{ item }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{%- endmacro %}

@@ -33,6 +33,17 @@ from app.onboarding import DecisionError, approve_request, notify_decision, pars
 from app.inventory.orders import cap_to_available, order_total, to_order_lines
 from app.phones import format_phone, normalize_phone
 from app.web import aggregations, catalog, formatting
+from app.hours import (
+    DELIVERY_CLOSE,
+    DELIVERY_OPEN,
+    hhmm,
+    hours_label,
+    lunch_label,
+    lunch_segment,
+    range_parts,
+    segment,
+    window_label,
+)
 from app.web.store_forms import PAYMENT_METHODS, parse_store_form
 from app.web.auth import (
     authenticate,
@@ -59,6 +70,13 @@ templates.env.filters["day"] = day_label
 templates.env.filters["deadline"] = deadline_label
 templates.env.filters["phone"] = format_phone
 templates.env.globals["payment_methods"] = PAYMENT_METHODS
+templates.env.globals["delivery_window"] = window_label()
+templates.env.globals["delivery_bounds"] = (hhmm(DELIVERY_OPEN), hhmm(DELIVERY_CLOSE))
+templates.env.globals["lunch_window"] = lunch_label()
+templates.env.globals["lunch_segment"] = lunch_segment()
+templates.env.filters["hours"] = hours_label
+templates.env.filters["hours_segment"] = segment
+templates.env.filters["hours_parts"] = range_parts
 templates.env.globals["weekday_names"] = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 templates.env.globals["parse_days"] = parse_visit_weekdays
 

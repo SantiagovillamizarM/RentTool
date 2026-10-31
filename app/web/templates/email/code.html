@@ -1,0 +1,15 @@
+{% extends "email/base.html" %}
+{% import "email/_parts.html" as parts %}
+{% block body %}
+<p style="margin:0;">Escribe este código en la página de TenderoBot para confirmar tu correo:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px;">
+  <tr>
+    <td align="center" style="background-color:#fff8e6; border:1px dashed #f6be45; border-radius:16px; padding:22px 12px;">
+      <div style="font-family:'Courier New',Courier,monospace; font-size:38px; line-height:44px; font-weight:bold; letter-spacing:8px; color:#041c4b;">{{ code[:3] }} {{ code[3:] }}</div>
+      <div style="padding-top:8px; font-family:Arial,Helvetica,sans-serif; font-size:13px; color:#8a6a1c;">Vence en {{ minutes }} minutos</div>
+    </td>
+  </tr>
+</table>
+{{ parts.note("🔒 Nadie de TenderoBot te va a pedir este código. No lo compartas.") }}
+{% endblock %}
+{% block footer %}Si no pediste este código, ignora este correo: sin él nadie puede usar tu correo en TenderoBot.{% endblock %}

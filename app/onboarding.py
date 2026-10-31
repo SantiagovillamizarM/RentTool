@@ -16,6 +16,8 @@ from telegram import Bot
 from app.bot import keyboards, texts
 from app.config import get_settings
 from app.db import SessionLocal
+from app.emails import Email, approved_email, rejected_email
+from app.emails import reminder_email as build_reminder_email
 from app.mailer import email_enabled, send_email
 from app.models import Distributor, Store, StoreRequest
 
@@ -114,37 +116,14 @@ def reject_request(request: StoreRequest, reason: str) -> None:
 # --- Correos ------------------------------------------------------------------
 
 
-def reminder_email(request: StoreRequest, link: str) -> tuple[str, str]:
-    open_bot = f"Ábrelo aquí: {link}" if link else "Búscalo en Telegram como TenderoBot."
-    return (
-        "Abre TenderoBot para saber cuándo te aprueban",
-        f"Hola, {request.owner_name}.\n\n"
-        f"Recibimos tu solicitud para usar TenderoBot en {request.store_name}. Tu distribuidor la está revisando.\n\n"
-        "Para que te avisemos por Telegram apenas te respondan, abre el bot y toca "
-        f"\"📱 Compartir mi número\" (usa el celular {request.phone}).\n{open_bot}\n\n"
-        "— TenderoBot",
-    )
+def reminder_email(request: StoreRequest, link: str) -> Email:
+    return build_reminder_email(request.owner_name, request.store_name, request.phone, link)
 
 
-def decision_email(request: StoreRequest, distributor: str, link: str) -> tuple[str, str]:
+def decision_email(request: StoreRequest, distributor: str, link: str) -> Email:
     if request.status == "approved":
-        open_bot = f"Ábrelo aquí: {link}" if link else "Búscalo en Telegram como TenderoBot."
-        return (
-            "✅ Tu tienda fue aprobada en TenderoBot",
-            f"Hola, {request.owner_name}.\n\n"
-            f"{distributor} aprobó tu tienda {request.store_name}. Ya puedes usar TenderoBot.\n\n"
-            "Abre el bot en Telegram y toca \"📱 Compartir mi número\" "
-            f"(usa el celular {request.phone}).\n{open_bot}\n\n"
-            "— TenderoBot",
-        )
-    page = request_page_url()
-    retry = f"\n\nSi lo puedes corregir, envía una solicitud nueva en {page}" if page else ""
-    return (
-        "Tu solicitud en TenderoBot no fue aprobada",
-        f"Hola, {request.owner_name}.\n\n"
-        f"Tu solicitud para {request.store_name} no fue aprobada.\nMotivo: {request.rejection_reason}{retry}\n\n"
-        "— TenderoBot",
-    )
+        return approved_email(request.owner_name, request.store_name, distributor, request.phone, link)
+    return rejected_email(request.owner_name, request.store_name, request.rejection_reason or "", request_page_url())
 
 
 # --- Avisos -------------------------------------------------------------------
@@ -182,8 +161,9 @@ async def notify_decision(bot: Bot, request_id: int) -> bool:
         store = await session.get(Store, request.store_id) if request.store_id else None
         sent = await _notify_by_telegram(bot, request, distributor or "Tu distribuidor", store)
         if not sent:
-            subject, body = decision_email(request, distributor or "Tu distribuidor", bot_link(bot.username))
-            sent = await send_email(request.email, subject, body)
+            sent = await send_email(
+                request.email, decision_email(request, distributor or "Tu distribuidor", bot_link(bot.username))
+            )
         if sent:
             request.decision_notified_at = datetime.now(UTC)
             await session.commit()
@@ -217,8 +197,7 @@ async def send_request_followups(bot: Bot, now: datetime | None = None) -> int:
                 )
             ).all()
         for request in reminders:
-            subject, body = reminder_email(request, bot_link(bot.username))
-            if await send_email(request.email, subject, body):
+            if await send_email(request.email, reminder_email(request, bot_link(bot.username))):
                 sent += 1
             # Un solo intento: un correo malo no se reintenta cada 10 minutos.
             request.reminder_email_sent_at = now

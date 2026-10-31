@@ -1,4 +1,6 @@
 {# Campos de una tienda en el panel (crear y editar). `v` es un dict con los valores; `days` los días de ruta marcados. #}
+{% import "_hours_fields.html" as hours %}
+
 {% macro route_days_picker(days, lead_time) %}
 <fieldset class="wide day-picker">
   <legend>Días en que tu camión pasa por la tienda</legend>
@@ -22,7 +24,6 @@
 <label>Ciudad<input name="city" value="{{ v.city or '' }}" maxlength="80"></label>
 <label>Barrio<input name="neighborhood" value="{{ v.neighborhood or '' }}" maxlength="120"></label>
 <label>Dirección<input name="address" value="{{ v.address or '' }}" maxlength="200"></label>
-<label>Horario para recibir<input name="receiving_hours" value="{{ v.receiving_hours or '' }}" maxlength="80" placeholder="7 a. m. a 12 m."></label>
 <label>Forma de pago
   <select name="payment_method">
     <option value="">Sin definir</option>
@@ -30,4 +31,6 @@
   </select>
 </label>
 {{ route_days_picker(days, v.lead_time_days) }}
+{% set parts = v.receiving_hours|hours_parts if v.receiving_hours else (v.receiving_from, v.receiving_to) %}
+{{ hours.hours_fields(parts[0], parts[1], required=False, legend="Horario para recibir mercancía") }}
 {% endmacro %}

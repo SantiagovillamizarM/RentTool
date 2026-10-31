@@ -1,0 +1,12 @@
+{% extends "email/base.html" %}
+{% import "email/_parts.html" as parts %}
+{% block body %}
+<p style="margin:0;">Recibimos tu solicitud para usar TenderoBot en <strong>{{ store_name }}</strong>. Tu distribuidor la está revisando.</p>
+<p style="margin:14px 0 0;">Para que te avisemos por Telegram apenas te respondan, falta un paso:</p>
+{{ parts.steps([
+  ("Abre <strong>TenderoBot</strong> en Telegram" ~ ("." if link else ": búscalo como TenderoBot."))|safe,
+  "Toca <strong>Iniciar</strong> y luego <strong>📱 Compartir mi número</strong>."|safe,
+  "Usa el mismo celular que escribiste: <strong>"|safe ~ phone ~ "</strong>."|safe,
+]) }}
+{% if link %}{{ parts.button(link, "Abrir TenderoBot") }}{% endif %}
+{% endblock %}

@@ -1035,7 +1035,7 @@ legend { padding: 0; margin-bottom: 0.5rem; font-weight: 550; font-size: 0.85rem
 .request-section { display: grid; grid-template-columns: 0.75fr 1.25fr; gap: 2.5rem; align-items: start; }
 .mini-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.85rem; color: var(--muted); }
 .mini-steps strong { color: var(--text); }
-.request-form .location { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.request-form .location { display: flex; flex-direction: column; gap: 0.75rem; }
 .form-grid label.consent { flex-direction: row; align-items: flex-start; gap: 0.7rem; font-weight: 400; font-size: 0.85rem; line-height: 1.5; }
 .consent input { margin-top: 0.2rem; flex: none; width: 18px; height: 18px; }
 .form-grid label.trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
@@ -1181,3 +1181,142 @@ html { scroll-behavior: smooth; }
   .js .reveal { opacity: 1; transform: none; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
+
+/* ---------------------------------------------------------------- Registro y solicitud */
+
+.join-card { display: flex; flex-direction: column; align-items: flex-start; gap: 0.85rem; margin-top: 0; padding: 1.75rem; }
+/* Tarjeta corta: centrada con la columna de los pasos. Con el formulario abierto, arriba. */
+.request-section > .join-card { align-self: center; }
+.request-section > .join-card:has(.unfold[open]) { align-self: start; }
+.join-card h3 { font-size: 1.35rem; letter-spacing: -0.03em; line-height: 1.2; }
+.join-card > p { margin: 0; }
+.join-card .alert { margin: 0; align-self: stretch; }
+.signed-in { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.75rem; margin: 0; color: var(--muted); font-size: 0.9rem; }
+.signed-in strong { color: var(--text); overflow-wrap: anywhere; }
+
+/* Botón que despliega un formulario: al abrirse, el botón se va y el formulario entra. */
+.unfold { align-self: stretch; }
+.unfold > summary { list-style: none; width: fit-content; }
+.unfold > summary::-webkit-details-marker { display: none; }
+.unfold[open] > summary { display: none; }
+.unfold-body { margin-top: 0.5rem; }
+.unfold[open] > .unfold-body { animation: rise 0.55s var(--ease-out) backwards; }
+
+.inline-form { display: inline; margin: 0; }
+.link-btn {
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--amber);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(246, 190, 69, 0.4);
+  transition: color 0.2s, text-decoration-color 0.2s;
+}
+.link-btn:hover { color: #ffd77e; text-decoration-color: currentColor; }
+
+/* Página del código */
+.code-form { display: flex; flex-direction: column; gap: 0.5rem; margin: 1.5rem 0 1rem; }
+input.code-input {
+  font-size: 1.8rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+}
+.code-form button.primary { justify-content: space-between; margin-top: 0.75rem; padding-left: 1.4rem; }
+.code-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; }
+
+@media (max-width: 640px) {
+  .join-card { padding: 1.25rem; }
+  input.code-input { font-size: 1.5rem; letter-spacing: 0.35em; }
+}
+
+/* ---------------------------------------------------------------- Horario de recibo */
+
+.hours-fields legend .hint { display: block; margin-top: 0.15rem; }
+.hours-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 0.75rem 1rem; }
+.form-grid .hours-inputs label { gap: 0.35rem; }
+input[type="time"] { color-scheme: dark; font-variant-numeric: tabular-nums; }
+
+/* Minibarra del panel: el horario de reparto completo, con lo que la tienda recibe pintado. */
+.hours-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.hours-bar span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffd06a, var(--amber));
+}
+.hours-bar .hours-lunch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(3, 9, 20, 0.95) 0 3px, rgba(255, 255, 255, 0.12) 3px 5px);
+}
+.facts .hours-bar { margin-top: 0.45rem; max-width: 220px; }
+
+@media (max-width: 640px) {
+  .hours-inputs { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------------------------------------------------------------- Mapa de la tienda */
+
+.location-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.85rem; }
+.map-box:not([hidden]) { display: flex; flex-direction: column; gap: 0.6rem; animation: rise 0.45s var(--ease-out, ease) backwards; }
+.map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.map-hint { margin: 0; }
+.map {
+  height: 320px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--stroke-2);
+  overflow: hidden;
+  background: #0b1630;
+  z-index: 0;
+}
+/* Mapa de OpenStreetMap en tonos oscuros, para que combine con la página. */
+.map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6); }
+.map .leaflet-control-zoom a { background: #0f1d3d; color: var(--text); border-color: var(--stroke-2); }
+.map .leaflet-control-zoom a:hover { background: #16294f; color: var(--amber); }
+.map .leaflet-control-attribution { background: rgba(3, 9, 20, 0.75); color: var(--muted); }
+.map .leaflet-control-attribution a { color: var(--amber); }
+
+/* Pin de la tienda: gota amarilla con punto azul */
+.map-pin span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 0;
+  background: linear-gradient(135deg, #ffd06a, var(--amber));
+  border: 2px solid var(--navy);
+  transform: rotate(-45deg);
+  box-shadow: 0 8px 18px -6px rgba(0, 0, 0, 0.8);
+}
+.map-pin span::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+@media (max-width: 640px) {
+  .map { height: 260px; }
+}
+
+.map.leaflet-container { background: #0b1630; }

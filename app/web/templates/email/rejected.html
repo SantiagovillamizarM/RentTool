@@ -1,0 +1,10 @@
+{% extends "email/base.html" %}
+{% import "email/_parts.html" as parts %}
+{% block body %}
+<p style="margin:0;">Revisamos tu solicitud para <strong>{{ store_name }}</strong> y por ahora no fue aprobada.</p>
+{{ parts.note("Motivo: " ~ reason, color="#fff1ef", border="#f6cfc8", ink="#8a2f22") }}
+{% if page %}
+<p style="margin:18px 0 0;">Si lo puedes corregir, envía una solicitud nueva:</p>
+{{ parts.button(page, "Enviar otra solicitud") }}
+{% endif %}
+{% endblock %}

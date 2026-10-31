@@ -149,7 +149,7 @@ async def test_panel_without_session_redirects_to_login():
 
 
 @pytest.mark.asyncio
-async def test_root_is_the_public_page_with_the_request_form():
+async def test_root_asks_to_register_before_showing_the_request_form():
     from types import SimpleNamespace
 
     from app.db import get_session
@@ -168,10 +168,16 @@ async def test_root_is_the_public_page_with_the_request_form():
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             root = await client.get("/")
             assert root.status_code == 200
-            assert 'action="/solicitud"' in root.text
-            assert "Pedir acceso" in root.text
-            # Con un solo distribuidor no se le pregunta al tendero cuál es.
-            assert 'name="distributor_id"' not in root.text
+            assert "¿Quieres usar TenderoBot?" in root.text
+            assert 'action="/registro"' in root.text
+            # Sin correo confirmado no hay formulario de solicitud, y enviarlo a mano no sirve.
+            assert 'action="/solicitud"' not in root.text
+            direct = await client.post("/solicitud", data={"store_name": "Robot"})
+            assert direct.status_code == 303
+            assert direct.headers["location"] == "/#solicitar"
+            # Sin un código pedido, la página del código vuelve al inicio.
+            code = await client.get("/registro/codigo")
+            assert code.status_code == 303
             sent = await client.get("/solicitud/enviada")
             assert sent.status_code == 200
             assert "abre el bot" in sent.text

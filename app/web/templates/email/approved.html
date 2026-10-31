@@ -1,0 +1,12 @@
+{% extends "email/base.html" %}
+{% import "email/_parts.html" as parts %}
+{% block body %}
+<p style="margin:0;"><strong>{{ distributor }}</strong> aprobó tu tienda <strong>{{ store_name }}</strong>. Ya puedes llevar tu inventario y hacer tus pedidos desde Telegram.</p>
+{{ parts.steps([
+  ("Abre <strong>TenderoBot</strong> en Telegram" ~ ("." if link else ": búscalo como TenderoBot."))|safe,
+  "Toca <strong>Iniciar</strong> y luego <strong>📱 Compartir mi número</strong>."|safe,
+  "Usa el celular <strong>"|safe ~ phone ~ "</strong>. Así entras sin contraseñas."|safe,
+]) }}
+{% if link %}{{ parts.button(link, "Empezar a usar TenderoBot") }}{% endif %}
+{{ parts.note("💡 Cuando entres, escribe lo que vendes (\"2 coca litro y un pan\") o mándale una foto del estante.") }}
+{% endblock %}

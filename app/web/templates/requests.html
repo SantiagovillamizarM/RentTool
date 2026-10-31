@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
 {% import "_store_fields.html" as fields %}
+{% import "_hours_fields.html" as hours %}
 {% block title %}Solicitudes{% endblock %}
 {% block content %}
 <header class="page-head">
@@ -28,7 +29,7 @@
     <div><dt>Correo</dt><dd>{{ r.email }}</dd></div>
     <div><dt>Dirección</dt><dd>{{ r.address }}, {{ r.neighborhood }}, {{ r.city }}
       {% if r.latitude is not none %}<br><a href="https://www.openstreetmap.org/?mlat={{ r.latitude }}&amp;mlon={{ r.longitude }}#map=18/{{ r.latitude }}/{{ r.longitude }}" target="_blank" rel="noopener">Ver en el mapa</a>{% endif %}</dd></div>
-    <div><dt>Horario para recibir</dt><dd>{{ r.receiving_hours }}</dd></div>
+    <div><dt>Horario para recibir</dt><dd>{{ r.receiving_hours|hours }}{{ hours.hours_bar(r.receiving_hours) }}</dd></div>
     <div><dt>Forma de pago</dt><dd>{{ payment_methods[r.payment_method] }}</dd></div>
   </dl>
 

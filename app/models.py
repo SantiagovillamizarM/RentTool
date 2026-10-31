@@ -148,6 +148,24 @@ class StoreRequest(Base):
     distributor: Mapped[Distributor] = relationship()
 
 
+class EmailVerification(Base):
+    """Código de 6 dígitos que se manda al correo antes de dejar llenar la solicitud (frena a los robots).
+
+    Solo se guarda el hash del código. Vale para el último código sin usar de ese correo.
+    """
+
+    __tablename__ = "email_verifications"
+    __table_args__ = (Index("ix_email_verifications_email_created", "email", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class StoreConsent(Base):
     """Autorización de datos (Ley 1581) que dio una cuenta de Telegram para una tienda.
 

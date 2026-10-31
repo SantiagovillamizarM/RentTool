@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
+{% import "_hours_fields.html" as hours %}
 {% block title %}Inventario y pedidos para tu tienda{% endblock %}
 {% block content %}
 <header class="site-header">
@@ -20,7 +21,7 @@
     <h1>Tu tienda surtida, <span class="accent">sin cuadernos.</span></h1>
     <p>Le cuentas a TenderoBot lo que vendes, le mandas una foto del estante y él te arma el pedido para tu distribuidor. Así no te quedas sin lo que más se vende ni te llenas de lo que no sale.</p>
     <div class="hero-actions">
-      <a href="#solicitar" class="btn btn-primary">Pedir acceso <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+      <a href="#solicitar" class="btn btn-primary">Quiero usarlo <span class="btn-arrow">{{ icon.arrow() }}</span></a>
       <a href="#como-funciona" class="btn btn-ghost">Ver cómo funciona</a>
     </div>
     <p class="hero-note">Gratis para el tendero · Solo necesitas Telegram</p>
@@ -68,52 +69,106 @@
     <span class="eyebrow">Pedir acceso</span>
     <h2>Empieza en tres pasos</h2>
     <ol class="mini-steps">
-      <li><strong>Llenas este formulario</strong> con los datos de tu tienda.</li>
-      <li><strong>Tu distribuidor lo revisa</strong>: tus datos y si su camión llega hasta tu tienda.</li>
+      <li><strong>Te registras con tu correo.</strong> Te mandamos un código para confirmar que es tuyo.</li>
+      <li><strong>Llenas la solicitud</strong> con los datos de tu tienda. Tu distribuidor revisa si su camión llega hasta ti.</li>
       <li><strong>Te avisamos por Telegram</strong> apenas te respondan. Si no has abierto el bot, te escribimos al correo.</li>
     </ol>
   </div>
 
-  <form method="post" action="/solicitud" class="card request-form form-grid" novalidate>
-    {% for error in errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
-    {% if distributors|length > 1 %}
-    <label class="wide">Tu distribuidor
-      <select name="distributor_id" required>
-        <option value="">Escoge uno</option>
-        {% for d in distributors %}<option value="{{ d.id }}"{% if form.distributor_id == d.id|string %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
-      </select>
-    </label>
+  {% if not applicant %}
+  <div class="card join-card">
+    <h3>¿Quieres usar TenderoBot?</h3>
+    <p class="muted">Es gratis para el tendero. Primero confirma tu correo; después llenas los datos de tu tienda.</p>
+    <details class="unfold"{% if register_errors %} open{% endif %}>
+      <summary class="btn btn-primary">Sí, quiero registrarme <span class="btn-arrow">{{ icon.arrow() }}</span></summary>
+      <form method="post" action="/registro" class="form-grid unfold-body" novalidate>
+        {% for error in register_errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
+        <label class="wide">Tu correo<input name="email" type="email" value="{{ register_email }}" maxlength="255" autocomplete="email" placeholder="tienda@gmail.com" required></label>
+        <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
+        <div class="actions wide">
+          <button type="submit" class="primary">Enviarme el código <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  {% elif existing and existing.status in ('pending', 'approved') %}
+  <div class="card join-card">
+    <p class="signed-in">Registrado como <strong>{{ applicant }}</strong></p>
+    {% if existing.status == 'pending' %}
+    <h3>📝 Tu solicitud para {{ existing.store_name }} está en revisión</h3>
+    <p class="muted">Te avisamos por Telegram apenas tu distribuidor responda.{% if not existing.telegram_chat_id %} Para eso, abre el bot y toca 📱 Compartir mi número.{% endif %}</p>
+    {% else %}
+    <h3>✅ {{ existing.store_name }} ya fue aprobada</h3>
+    <p class="muted">Abre el bot en Telegram y toca 📱 Compartir mi número para empezar.</p>
     {% endif %}
-    <label>Nombre de la tienda<input name="store_name" value="{{ form.store_name or '' }}" maxlength="160" autocomplete="organization" required></label>
-    <label>Tu nombre<input name="owner_name" value="{{ form.owner_name or '' }}" maxlength="160" autocomplete="name" required></label>
-    <label>Cédula o NIT<input name="document_id" value="{{ form.document_id or '' }}" maxlength="20" inputmode="numeric" required></label>
-    <label>Celular <span class="hint">El mismo de tu Telegram</span><input name="phone" value="{{ form.phone or '' }}" inputmode="tel" maxlength="24" autocomplete="tel" placeholder="300 123 4567" required></label>
-    <label class="wide">Correo <span class="hint">Por si no abres el bot</span><input name="email" type="email" value="{{ form.email or '' }}" maxlength="255" autocomplete="email" placeholder="tienda@gmail.com" required></label>
-    <label>Ciudad<input name="city" value="{{ form.city or '' }}" maxlength="80" autocomplete="address-level2" required></label>
-    <label>Barrio<input name="neighborhood" value="{{ form.neighborhood or '' }}" maxlength="120" required></label>
-    <label class="wide">Dirección<input name="address" value="{{ form.address or '' }}" maxlength="200" autocomplete="street-address" placeholder="Calle 45 # 12-30" required></label>
-    <label>Horario para recibir mercancía<input name="receiving_hours" value="{{ form.receiving_hours or '' }}" maxlength="80" placeholder="7 a. m. a 12 m." required></label>
-    <fieldset class="choice">
-      <legend>¿Cómo pagarías los pedidos?</legend>
-      {% for key, label in payment_methods.items() %}
-      <label class="choice-option"><input type="radio" name="payment_method" value="{{ key }}"{% if form.payment_method == key %} checked{% endif %}><span>{{ label }}</span></label>
-      {% endfor %}
-    </fieldset>
-    <div class="wide location">
-      <input type="hidden" name="latitude" id="latitude" value="{{ form.latitude or '' }}">
-      <input type="hidden" name="longitude" id="longitude" value="{{ form.longitude or '' }}">
-      <button type="button" class="btn btn-ghost" id="use-location">📍 Usar mi ubicación</button>
-      <span class="muted small" id="location-status">{% if form.latitude %}Ubicación agregada.{% else %}Opcional: ayuda al distribuidor a encontrar tu tienda. Úsalo estando en la tienda.{% endif %}</span>
+    {% if bot_link %}<a href="{{ bot_link }}" class="btn btn-primary" target="_blank" rel="noopener">Abrir TenderoBot <span class="btn-arrow">{{ icon.arrow() }}</span></a>{% endif %}
+    <form method="post" action="/registro/salir" class="inline-form"><button type="submit" class="link-btn">Usar otro correo</button></form>
+  </div>
+
+  {% else %}
+  <div class="card join-card">
+    <div class="signed-in">✅ Correo confirmado: <strong>{{ applicant }}</strong>
+      <form method="post" action="/registro/salir" class="inline-form"><button type="submit" class="link-btn">Cambiar</button></form>
     </div>
-    <label class="wide consent">
-      <input type="checkbox" name="consent"{% if form.consent == 'on' %} checked{% endif %} required>
-      <span>Autorizo a TenderoBot y a mi distribuidor a usar estos datos para revisar mi solicitud y, si me aprueban, para manejar el inventario y los pedidos de mi tienda (Ley 1581 de 2012). Puedo pedir conocerlos, corregirlos o borrarlos cuando quiera.</span>
-    </label>
-    <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
-    <div class="actions wide">
-      <button type="submit" class="primary">Enviar solicitud <span class="btn-arrow">{{ icon.arrow() }}</span></button>
-    </div>
-  </form>
+    {% if existing and existing.status == 'rejected' %}
+    <p class="alert">Tu solicitud anterior para {{ existing.store_name }} no fue aprobada. Motivo: {{ existing.rejection_reason }}. Puedes corregir y enviar otra.</p>
+    {% endif %}
+    <details class="unfold"{% if errors %} open{% endif %}>
+      <summary class="btn btn-primary">Llenar la solicitud <span class="btn-arrow">{{ icon.arrow() }}</span></summary>
+      <form method="post" action="/solicitud" class="request-form form-grid unfold-body" novalidate>
+        {% for error in errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
+        {% if distributors|length > 1 %}
+        <label class="wide">Tu distribuidor
+          <select name="distributor_id" required>
+            <option value="">Escoge uno</option>
+            {% for d in distributors %}<option value="{{ d.id }}"{% if form.distributor_id == d.id|string %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+        <label>Nombre de la tienda<input name="store_name" value="{{ form.store_name or '' }}" maxlength="160" autocomplete="organization" required></label>
+        <label>Tu nombre<input name="owner_name" value="{{ form.owner_name or '' }}" maxlength="160" autocomplete="name" required></label>
+        <label>Cédula o NIT<input name="document_id" value="{{ form.document_id or '' }}" maxlength="20" inputmode="numeric" required></label>
+        <label>Celular <span class="hint">El mismo de tu Telegram</span><input name="phone" value="{{ form.phone or '' }}" inputmode="tel" maxlength="24" autocomplete="tel" placeholder="300 123 4567" required></label>
+        <label>Ciudad<input name="city" value="{{ form.city or '' }}" maxlength="80" autocomplete="address-level2" required></label>
+        <label>Barrio<input name="neighborhood" value="{{ form.neighborhood or '' }}" maxlength="120" required></label>
+        <label class="wide">Dirección<input name="address" value="{{ form.address or '' }}" maxlength="200" autocomplete="street-address" placeholder="Calle 45 # 12-30" required></label>
+        {{ hours.hours_fields(form.receiving_from, form.receiving_to) }}
+        <fieldset class="choice">
+          <legend>¿Cómo pagarías los pedidos?</legend>
+          {% for key, label in payment_methods.items() %}
+          <label class="choice-option"><input type="radio" name="payment_method" value="{{ key }}"{% if form.payment_method == key %} checked{% endif %}><span>{{ label }}</span></label>
+          {% endfor %}
+        </fieldset>
+        <div class="wide location" data-store-map>
+          <input type="hidden" name="latitude" value="{{ form.latitude or '' }}">
+          <input type="hidden" name="longitude" value="{{ form.longitude or '' }}">
+          <div class="location-head">
+            <button type="button" class="btn btn-ghost map-toggle">📍 Marcar mi tienda en el mapa</button>
+            <span class="muted small map-status">{% if form.latitude %}Ubicación marcada.{% else %}Opcional: ayuda al distribuidor a encontrar tu tienda. Puedes hacerlo desde cualquier lugar.{% endif %}</span>
+          </div>
+          <div class="map-box" hidden>
+            <div class="map-tools">
+              <button type="button" class="small-btn map-search">🔎 Buscar mi dirección</button>
+              <button type="button" class="small-btn map-here">📍 Estoy en la tienda</button>
+              <button type="button" class="link-btn map-clear">Quitar ubicación</button>
+            </div>
+            <div class="map"></div>
+            <p class="muted small map-hint">Toca el mapa o arrastra el pin hasta la puerta de tu tienda.</p>
+          </div>
+        </div>
+        <label class="wide consent">
+          <input type="checkbox" name="consent"{% if form.consent == 'on' %} checked{% endif %} required>
+          <span>Autorizo a TenderoBot y a mi distribuidor a usar estos datos para revisar mi solicitud y, si me aprueban, para manejar el inventario y los pedidos de mi tienda (Ley 1581 de 2012). Puedo pedir conocerlos, corregirlos o borrarlos cuando quiera.</span>
+        </label>
+        <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
+        <div class="actions wide">
+          <button type="submit" class="primary">Enviar solicitud <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+        </div>
+      </form>
+    </details>
+  </div>
+  {% endif %}
 </section>
 
 <section class="landing-section distributors reveal" id="distribuidores">
@@ -132,22 +187,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/panel/static/store-map.js?v={{ static_version }}" defer></script>
 <script>
-  (function () {
-    var button = document.getElementById("use-location");
-    var status = document.getElementById("location-status");
-    if (!navigator.geolocation) { button.hidden = true; return; }
-    button.addEventListener("click", function () {
-      status.textContent = "Buscando tu ubicación…";
-      navigator.geolocation.getCurrentPosition(function (position) {
-        document.getElementById("latitude").value = position.coords.latitude.toFixed(6);
-        document.getElementById("longitude").value = position.coords.longitude.toFixed(6);
-        status.textContent = "Ubicación agregada.";
-      }, function () {
-        status.textContent = "No pudimos tomar tu ubicación. No pasa nada: es opcional.";
-      }, { enableHighAccuracy: true, timeout: 15000 });
-    });
-  })();
-  {% if errors %}var form = document.getElementById("solicitar"); form.classList.add("in"); form.scrollIntoView({ behavior: "instant" });{% endif %}
+  {% if errors or register_errors %}var form = document.getElementById("solicitar"); form.classList.add("in"); form.scrollIntoView({ behavior: "instant" });{% endif %}
 </script>
 {% endblock %}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>{{ subject }}</title>
+</head>
+{#- Correo: tablas y estilos en línea, que es lo que Gmail, Outlook y Apple Mail muestran igual. -#}
+<body style="margin:0; padding:0; background-color:#eef1f7; -webkit-text-size-adjust:100%;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:#eef1f7;">{{ preheader }}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef1f7;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+
+          <tr>
+            <td style="background-color:#041c4b; background-image:linear-gradient(135deg,#041c4b 0%,#0a2a66 100%); border-radius:20px 20px 0 0; padding:24px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    <img src="cid:tenderobot-logo" width="44" height="44" alt="" style="display:block; border:2px solid #f6be45; border-radius:12px;">
+                  </td>
+                  <td style="vertical-align:middle; padding-left:12px; font-family:Arial,Helvetica,sans-serif;">
+                    <div style="color:#ffffff; font-size:18px; font-weight:bold; letter-spacing:-0.3px;">TenderoBot</div>
+                    <div style="color:#f6be45; font-size:12px; padding-top:2px;">Inventario y pedidos para tu tienda</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#ffffff; padding:36px 32px 28px; font-family:Arial,Helvetica,sans-serif; color:#1d2840; font-size:15px; line-height:24px;">
+              <p style="margin:0 0 6px; color:#6b7895; font-size:14px;">Hola{% if name %}, {{ name }}{% endif %} 👋</p>
+              <h1 style="margin:0 0 16px; font-size:24px; line-height:31px; color:#041c4b; letter-spacing:-0.4px;">{{ title }}</h1>
+              {% block body %}{% endblock %}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#ffffff; border-radius:0 0 20px 20px; padding:0 32px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="border-top:1px solid #e3e8f1; padding-top:18px; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:18px; color:#8a94a8;">
+                  {% block footer %}Este es un mensaje automático de TenderoBot. No hace falta responderlo.{% endblock %}
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:20px 16px 0; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:17px; color:#9aa3b5;">
+              TenderoBot · Inventario con IA para tiendas de barrio en Colombia<br>
+              Tus datos se tratan según la Ley 1581 de 2012.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

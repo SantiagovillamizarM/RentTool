@@ -21,7 +21,8 @@ VALID_REQUEST = {
     "city": "Bucaramanga",
     "neighborhood": "San Francisco",
     "address": "Calle 45 # 12-30",
-    "receiving_hours": "7 a. m. a 12 m.",
+    "receiving_from": "07:00",
+    "receiving_to": "12:00",
     "payment_method": "contado",
     "latitude": "7.119349",
     "longitude": "-73.122741",
@@ -57,6 +58,15 @@ def test_location_is_optional_and_both_or_nothing():
     data, _ = parse_store_request({**VALID_REQUEST, "longitude": "abc"})
     assert data["latitude"] is None and data["longitude"] is None
     assert parse_coordinate("200", 90) is None
+
+
+def test_receiving_hours_must_be_ranges_inside_delivery_time():
+    data, errors = parse_store_request(VALID_REQUEST)
+    assert data["receiving_hours"] == "07:00-12:00"
+    _data, errors = parse_store_request({**VALID_REQUEST, "receiving_to": ""})
+    assert errors == ["Escribe desde qué hora y hasta qué hora puedes recibir la mercancía."]
+    _data, errors = parse_store_request({**VALID_REQUEST, "receiving_from": "00:00", "receiving_to": "01:00"})
+    assert errors == ["Los camiones reparten de 6 a. m. a 8 p. m. Escribe horas dentro de ese horario."]
 
 
 def test_document_keeps_nit_check_digit():
@@ -161,19 +171,23 @@ async def test_approval_by_telegram_asks_for_consent_next():
 @pytest.mark.asyncio
 async def test_without_chat_the_notice_goes_by_email():
     assert not await onboarding._notify_by_telegram(FakeBot(), store_request(telegram_chat_id=None), "D", None)
-    subject, body = onboarding.decision_email(store_request(status="approved"), "Distribuidora El Barrio", "https://t.me/X")
-    assert "aprobada" in subject
-    assert "https://t.me/X" in body and "Compartir mi número" in body
-    subject, body = onboarding.decision_email(
-        store_request(status="rejected", rejection_reason="No llegamos a tu barrio"), "D", ""
+    email = onboarding.decision_email(store_request(status="approved"), "Distribuidora El Barrio", "https://t.me/X")
+    assert "aprobada" in email.subject
+    assert "https://t.me/X" in email.text and "Compartir mi número" in email.text
+    assert 'href="https://t.me/X"' in email.html and "Distribuidora El Barrio" in email.html
+    email = onboarding.decision_email(
+        store_request(status="rejected", rejection_reason="No llegamos a <tu> barrio"), "D", ""
     )
-    assert "Motivo: No llegamos a tu barrio" in body
+    assert "Motivo: No llegamos a <tu> barrio" in email.text
+    # Lo que escribe el distribuidor se escapa en el HTML.
+    assert "No llegamos a &lt;tu&gt; barrio" in email.html
 
 
 def test_reminder_email_points_to_the_bot():
-    subject, body = onboarding.reminder_email(store_request(), "https://t.me/TenderoPruebaBot")
-    assert "Abre TenderoBot" in subject
-    assert "https://t.me/TenderoPruebaBot" in body
+    email = onboarding.reminder_email(store_request(), "https://t.me/TenderoPruebaBot")
+    assert "Abre TenderoBot" in email.subject
+    assert "https://t.me/TenderoPruebaBot" in email.text
+    assert 'href="https://t.me/TenderoPruebaBot"' in email.html
 
 
 @pytest.mark.asyncio
@@ -181,7 +195,20 @@ async def test_email_is_skipped_without_smtp(monkeypatch):
     from app import mailer
 
     monkeypatch.setattr(mailer, "email_enabled", lambda: False)
-    assert await mailer.send_email("rosa@gmail.com", "x", "y") is False
+    assert await mailer.send_email("rosa@gmail.com", onboarding.reminder_email(store_request(), "")) is False
+
+
+def test_message_has_text_html_and_inline_logo():
+    from app import mailer
+
+    message = mailer.build_message("rosa@gmail.com", onboarding.reminder_email(store_request(), ""))
+    assert message.get_content_type() == "multipart/alternative"
+    text, html = message.get_payload()
+    assert text.get_content_type() == "text/plain"
+    assert html.get_content_type() == "multipart/related"
+    body, logo = html.get_payload()
+    assert "cid:tenderobot-logo" in body.get_content()
+    assert logo["Content-ID"] == "<tenderobot-logo>"
 
 
 # --- Bot ----------------------------------------------------------------------

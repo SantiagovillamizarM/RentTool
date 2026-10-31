@@ -1,0 +1,19 @@
+{#- Horario para recibir mercancía: una hora de inicio y una de final, escritas por la persona.
+    `start` y `end` vienen como "HH:MM"; el servidor valida el reparto y el almuerzo (app/hours.py). -#}
+{% macro hours_fields(start, end, required=True, legend="¿A qué hora puedes recibir la mercancía?") %}
+<fieldset class="wide hours-fields">
+  <legend>{{ legend }} <span class="hint">Los camiones reparten de {{ delivery_window }}, menos a la hora del almuerzo ({{ lunch_window }})</span></legend>
+  <div class="hours-inputs">
+    <label>Desde<input type="time" name="receiving_from" value="{{ start or '' }}" min="{{ delivery_bounds[0] }}" max="{{ delivery_bounds[1] }}"{% if required %} required{% endif %}></label>
+    <label>Hasta<input type="time" name="receiving_to" value="{{ end or '' }}" min="{{ delivery_bounds[0] }}" max="{{ delivery_bounds[1] }}"{% if required %} required{% endif %}></label>
+  </div>
+</fieldset>
+{% endmacro %}
+
+{#- Minibarra del panel: el horario de recibo dentro del horario de reparto, con el almuerzo cortado. -#}
+{% macro hours_bar(value) %}
+{% set part = value|hours_segment %}
+{% if part %}
+<div class="hours-bar" aria-hidden="true"><span style="left: {{ part[0] }}%; width: {{ part[1] }}%"></span><i class="hours-lunch" style="left: {{ lunch_segment[0] }}%; width: {{ lunch_segment[1] }}%"></i></div>
+{% endif %}
+{% endmacro %}

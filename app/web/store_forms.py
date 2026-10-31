@@ -4,6 +4,7 @@ import re
 from collections.abc import Callable, Mapping
 from decimal import Decimal, InvalidOperation
 
+from app.hours import HoursError, clean_hours
 from app.onboarding import DecisionError, parse_approval
 from app.phones import normalize_phone
 from app.web.catalog import FormError, parse_required
@@ -33,6 +34,14 @@ def parse_email(raw: str) -> str:
     if not _EMAIL.match(cleaned) or len(cleaned) > 255:
         raise FormError("El correo no es válido, por ejemplo: tienda@gmail.com.")
     return cleaned
+
+
+def parse_receiving_hours(start: str, end: str) -> str:
+    """Hora de inicio y de final dentro del horario de reparto (app.hours)."""
+    try:
+        return clean_hours(start, end)
+    except HoursError as exc:
+        raise FormError(str(exc)) from exc
 
 
 def parse_payment(raw: str) -> str:
@@ -80,7 +89,7 @@ def parse_store_request(form: Mapping[str, str]) -> tuple[dict, list[str]]:
         "city": _collect(errors, parse_required, get("city"), "la ciudad", 80),
         "neighborhood": _collect(errors, parse_required, get("neighborhood"), "el barrio", 120),
         "address": _collect(errors, parse_required, get("address"), "la dirección", 200),
-        "receiving_hours": _collect(errors, parse_required, get("receiving_hours"), "el horario para recibir", 80),
+        "receiving_hours": _collect(errors, parse_receiving_hours, get("receiving_from"), get("receiving_to")),
         "payment_method": _collect(errors, parse_payment, get("payment_method")),
         "latitude": parse_coordinate(get("latitude"), 90),
         "longitude": parse_coordinate(get("longitude"), 180),
@@ -108,7 +117,11 @@ def parse_store_form(form: Mapping[str, str], route_days: list[str], with_phone:
         "city": _optional(errors, parse_required, get("city"), "la ciudad", 80),
         "neighborhood": _optional(errors, parse_required, get("neighborhood"), "el barrio", 120),
         "address": _optional(errors, parse_required, get("address"), "la dirección", 200),
-        "receiving_hours": _optional(errors, parse_required, get("receiving_hours"), "el horario", 80),
+        "receiving_hours": (
+            _collect(errors, parse_receiving_hours, get("receiving_from"), get("receiving_to"))
+            if get("receiving_from").strip() or get("receiving_to").strip()
+            else None
+        ),
         "payment_method": _optional(errors, parse_payment, get("payment_method")),
         "route_days": approval.route_days if approval else [],
         "lead_time_days": approval.lead_time_days if approval else 1,
