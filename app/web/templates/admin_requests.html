@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Solicitudes de proveedores{% endblock %}
+{% block content %}
+<header class="page-head">
+  <span class="eyebrow">Solicitudes</span>
+  <h1>Empresas que quieren <span class="accent">ser proveedores</span></h1>
+  <p>Llegan desde la página de TenderoBot con el correo ya confirmado. Revisa el NIT y la matrícula mercantil en el RUES antes de aprobar. Al aprobar se crea el proveedor y le llega un enlace para crear su contraseña.</p>
+</header>
+
+{% include "_admin_flash.html" %}
+
+{% for r in pending %}
+{% set flagged = r.categories|regulated %}
+<section class="card request-card">
+  <div class="card-head">
+    <div>
+      <h2>{{ r.trade_name }}</h2>
+      <span class="muted small">{{ r.legal_name }} · pidió el {{ r.created_at|local_dt }}</span>
+    </div>
+    {% if flagged %}<span class="badge badge-risk" title="Venta regulada: revisa permisos">Revisar: {{ flagged|join(', ') }}</span>{% endif %}
+  </div>
+
+  <dl class="facts">
+    <div><dt>NIT</dt><dd>{{ r.nit }}</dd></div>
+    <div><dt>Matrícula mercantil</dt><dd>{{ r.chamber_registration }}</dd></div>
+    <div><dt>Representante legal</dt><dd>{{ r.legal_rep_name }}<br><span class="muted small">C. C. {{ r.legal_rep_document }}</span></dd></div>
+    <div><dt>Contacto</dt><dd>{{ r.contact_name }} ({{ r.contact_role }})<br><span class="muted small">{{ r.contact_phone|phone }} · {{ r.contact_email }}</span></dd></div>
+    <div><dt>Sede</dt><dd>{{ r.address }}, {{ r.city }}</dd></div>
+    <div><dt>Reparte en</dt><dd>{{ r.coverage }}</dd></div>
+    <div><dt>Vende</dt><dd>{{ (r.categories|categories_label)|join(', ') }}</dd></div>
+    <div><dt>Tamaño</dt><dd>{{ r.vehicles }} vehículo{{ '' if r.vehicles == 1 else 's' }} · unas {{ r.stores_estimate }} tiendas</dd></div>
+    {% if r.website %}<div><dt>Página web</dt><dd><a href="{{ r.website }}" target="_blank" rel="noopener nofollow">{{ r.website }}</a></dd></div>{% endif %}
+  </dl>
+
+  {% if error_for == r.id and error %}<p class="alert">{{ error }}</p>{% endif %}
+  <div class="decision">
+    <form method="post" action="/admin/solicitudes/{{ r.id }}/aprobar" class="form-grid">
+      <h3 class="wide">Aprobar</h3>
+      <p class="wide muted small">Se crea el proveedor {{ r.trade_name }} y una cuenta del panel para {{ r.contact_email }}.</p>
+      <div class="actions wide">
+        <button type="submit" class="primary">Aprobar proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+      </div>
+    </form>
+    <form method="post" action="/admin/solicitudes/{{ r.id }}/rechazar" class="form-grid">
+      <h3 class="wide">Rechazar</h3>
+      <label class="wide">Motivo (la empresa lo va a leer)
+        <textarea name="reason" maxlength="300" rows="3" placeholder="Por ejemplo: el NIT no aparece en el RUES." required></textarea>
+      </label>
+      <div class="actions wide">
+        <button type="submit" class="btn btn-ghost">Rechazar solicitud</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% else %}
+<section class="card"><p class="empty">No hay solicitudes de proveedores por revisar.</p></section>
+{% endfor %}
+
+{% if decided %}
+<section class="card">
+  <div class="card-head">
+    <h2>Ya respondidas</h2>
+    <span class="muted">Las últimas {{ decided|length }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Empresa</th><th>NIT</th><th>Respuesta</th><th>Fecha</th><th></th></tr></thead>
+      <tbody>
+        {% for r in decided %}
+        <tr>
+          <td><strong>{{ r.trade_name }}</strong><br><span class="muted small">{{ r.contact_email }}</span></td>
+          <td class="muted">{{ r.nit }}</td>
+          <td>{% if r.status == 'approved' %}<span class="badge badge-ok">Aprobada</span>
+              {% else %}<span class="badge badge-risk">Rechazada</span><br><span class="muted small">{{ r.rejection_reason }}</span>{% endif %}</td>
+          <td class="muted">{{ r.decided_at|local_dt }}</td>
+          <td class="num">{% if r.distributor_id %}<a class="row-link" href="/admin/proveedores/{{ r.distributor_id }}">Ver proveedor {{ icon.arrow() }}</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

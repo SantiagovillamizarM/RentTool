@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Crea tu contraseña{% endblock %}
+{% block content %}
+<div class="login">
+  <section class="login-hero">
+    <div class="login-orb"></div>
+    <a class="brand" href="/">
+      <img src="/panel/static/logo.png" alt="">
+      <span>TenderoBot<small>Panel del proveedor</small></span>
+    </a>
+    <span class="eyebrow">{{ 'Bienvenido' if purpose == 'activate' else 'Cambiar contraseña' }}</span>
+    <h1>{% if purpose == 'activate' %}Tu cuenta de proveedor <span class="accent">está lista.</span>{% else %}Escoge una <span class="accent">contraseña nueva.</span>{% endif %}</h1>
+    <p>Crea la contraseña con la que vas a entrar al panel. Debe tener al menos {{ min_length }} caracteres. Nadie de TenderoBot te la va a pedir.</p>
+  </section>
+
+  <section class="login-card">
+    {% if not valid %}
+    <h2>Este enlace ya no sirve</h2>
+    <p>Venció o ya se usó. Pídele al administrador de TenderoBot un enlace nuevo.</p>
+    <p class="login-foot"><a href="/login">Ir al login</a></p>
+    {% else %}
+    <h2>Crear contraseña</h2>
+    <p>Cuenta: <strong>{{ email }}</strong></p>
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+    <form method="post">
+      <label for="password">Contraseña nueva</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="{{ min_length }}" required autofocus>
+      <label for="confirm">Repítela</label>
+      <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="{{ min_length }}" required>
+      <button type="submit" class="primary">Guardar y entrar <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </form>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Solicitud de proveedor enviada{% endblock %}
+{% block content %}
+<header class="site-header">
+  <a class="brand" href="/">
+    <img src="/panel/static/logo.png" alt="">
+    <span>TenderoBot<small>Para proveedores</small></span>
+  </a>
+</header>
+
+<section class="sent-card card">
+  <span class="eyebrow">Solicitud enviada</span>
+  <h1>¡Gracias! La estamos <span class="accent">revisando.</span></h1>
+  <p>Nuestro equipo revisa los datos de la empresa: NIT, Cámara de Comercio, lo que vendes y dónde repartes.</p>
+  <ol class="mini-steps">
+    <li><strong>Te escribimos al correo</strong> con la respuesta.</li>
+    <li><strong>Si la aprobamos,</strong> el correo trae un enlace para crear tu contraseña del panel.</li>
+    <li><strong>En el panel</strong> cargas tu catálogo y registras a tus tenderos.</li>
+  </ol>
+  <p class="muted small">Si necesitamos algún documento, te lo pedimos por correo.</p>
+</section>
+{% endblock %}

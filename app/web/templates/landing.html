@@ -10,8 +10,9 @@
   </a>
   <nav class="site-nav" aria-label="Secciones">
     <a href="#como-funciona">Cómo funciona</a>
-    <a href="#distribuidores">Distribuidores</a>
-    <a href="/panel/login" class="site-login">Ingresar al panel</a>
+    <a href="#distribuidores">Proveedores</a>
+    <a href="/login" class="site-signin">Iniciar sesión</a>
+    <a href="#solicitar" class="site-login">Quiero usarlo</a>
   </nav>
 </header>
 
@@ -79,17 +80,35 @@
   <div class="card join-card">
     <h3>¿Quieres usar TenderoBot?</h3>
     <p class="muted">Es gratis para el tendero. Primero confirma tu correo; después llenas los datos de tu tienda.</p>
-    <details class="unfold"{% if register_errors %} open{% endif %}>
+    <details class="unfold"{% if register_errors and register_for != 'proveedor' %} open{% endif %}>
       <summary class="btn btn-primary">Sí, quiero registrarme <span class="btn-arrow">{{ icon.arrow() }}</span></summary>
       <form method="post" action="/registro" class="form-grid unfold-body" novalidate>
-        {% for error in register_errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
-        <label class="wide">Tu correo<input name="email" type="email" value="{{ register_email }}" maxlength="255" autocomplete="email" placeholder="tienda@gmail.com" required></label>
+        {% if register_for != 'proveedor' %}{% for error in register_errors %}<p class="alert wide">{{ error }}</p>{% endfor %}{% endif %}
+        <label class="wide">Tu correo<input name="email" type="email" value="{{ register_email if register_for != 'proveedor' else '' }}" maxlength="255" autocomplete="email" placeholder="tienda@gmail.com" required></label>
         <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
         <div class="actions wide">
           <button type="submit" class="primary">Enviarme el código <span class="btn-arrow">{{ icon.arrow() }}</span></button>
         </div>
       </form>
     </details>
+  </div>
+
+  {% elif role in ('admin', 'provider') %}
+  <div class="card join-card">
+    <div class="signed-in">Registrado como <strong>{{ applicant }}</strong>
+      <form method="post" action="/registro/salir" class="inline-form"><button type="submit" class="link-btn">Usar otro correo</button></form>
+    </div>
+    <h3>{{ 'Este correo es de una cuenta de administrador' if role == 'admin' else 'Este correo es de un proveedor' }}</h3>
+    <p class="muted">Cada correo tiene un solo papel en TenderoBot. Para pedir acceso como tendero, usa otro correo.</p>
+    {% if role == 'provider' %}<a href="/login" class="btn btn-ghost">Ir a mi panel de proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></a>{% endif %}
+  </div>
+
+  {% elif not distributors and not (existing and existing.status in ('pending', 'approved')) %}
+  <div class="card join-card">
+    <div class="signed-in">✅ Correo confirmado: <strong>{{ applicant }}</strong></div>
+    <h3>Todavía no hay proveedores en TenderoBot</h3>
+    <p class="muted">Para usar el bot, tu tienda necesita un proveedor que te surta. Apenas haya uno disponible podrás pedir acceso aquí mismo.</p>
+    <p class="muted small">¿Eres distribuidor? <a href="#distribuidores">Registra tu empresa como proveedor</a>.</p>
   </div>
 
   {% elif existing and existing.status in ('pending', 'approved') %}
@@ -119,7 +138,7 @@
       <form method="post" action="/solicitud" class="request-form form-grid unfold-body" novalidate>
         {% for error in errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
         {% if distributors|length > 1 %}
-        <label class="wide">Tu distribuidor
+        <label class="wide">Tu proveedor
           <select name="distributor_id" required>
             <option value="">Escoge uno</option>
             {% for d in distributors %}<option value="{{ d.id }}"{% if form.distributor_id == d.id|string %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
@@ -171,13 +190,121 @@
   {% endif %}
 </section>
 
-<section class="landing-section distributors reveal" id="distribuidores">
-  <div>
-    <span class="eyebrow">Para distribuidores</span>
-    <h2>Tus tiendas, <span class="accent">siempre surtidas</span></h2>
-    <p>Ves qué se les va a acabar a tus tenderos, qué no se vende y cuánto vas a despachar la próxima semana. Los pedidos te llegan armados, en cajas completas y ajustados a lo que tienes.</p>
+<section class="landing-section request-section providers reveal" id="distribuidores">
+  <div class="request-intro">
+    <span class="eyebrow">Para proveedores</span>
+    <h2>¿Quieres ser <span class="accent">proveedor?</span></h2>
+    <p class="muted">Si distribuyes productos a tiendas de barrio, TenderoBot te ayuda a venderles mejor:</p>
+    <ul class="mini-steps">
+      <li><strong>Pedidos armados</strong> en cajas completas y ajustados a lo que tienes.</li>
+      <li><strong>Ves qué se les va a acabar</strong> a tus tenderos y qué no se vende.</li>
+      <li><strong>Sabes cuánto vas a despachar</strong> la próxima semana.</li>
+    </ul>
+    <p class="muted small">¿Ya eres proveedor? <a href="/login">Inicia sesión</a>.</p>
   </div>
-  <a href="/panel/login" class="btn btn-ghost">Ingresar al panel <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+
+  {% if not applicant %}
+  <div class="card join-card">
+    <h3>Registra tu empresa</h3>
+    <p class="muted">Primero confirma tu correo. Después llenas los datos de la empresa y nuestro equipo los revisa: NIT, Cámara de Comercio y lo que vendes.</p>
+    <details class="unfold"{% if register_errors and register_for == 'proveedor' %} open{% endif %}>
+      <summary class="btn btn-primary">Sí, quiero ser proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></summary>
+      <form method="post" action="/registro" class="form-grid unfold-body" novalidate>
+        <input type="hidden" name="para" value="proveedor">
+        {% if register_for == 'proveedor' %}{% for error in register_errors %}<p class="alert wide">{{ error }}</p>{% endfor %}{% endif %}
+        <label class="wide">Correo de la empresa<input name="email" type="email" value="{{ register_email if register_for == 'proveedor' else '' }}" maxlength="255" autocomplete="email" placeholder="ventas@tuempresa.co" required></label>
+        <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
+        <div class="actions wide">
+          <button type="submit" class="primary">Enviarme el código <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  {% elif role in ('admin', 'tendero') %}
+  <div class="card join-card">
+    <div class="signed-in">Registrado como <strong>{{ applicant }}</strong>
+      <form method="post" action="/registro/salir" class="inline-form"><button type="submit" class="link-btn">Usar otro correo</button></form>
+    </div>
+    <h3>{{ 'Este correo es de una cuenta de administrador' if role == 'admin' else 'Este correo es de un tendero' }}</h3>
+    <p class="muted">Cada correo tiene un solo papel en TenderoBot. Para registrar una empresa proveedora, usa otro correo.</p>
+    
+  </div>
+
+  {% elif provider_account %}
+  <div class="card join-card">
+    <p class="signed-in">Registrado como <strong>{{ applicant }}</strong></p>
+    <h3>✅ Ya tienes una cuenta de proveedor</h3>
+    <a href="/login" class="btn btn-primary">Entrar a mi panel <span class="btn-arrow">{{ icon.arrow() }}</span></a>
+  </div>
+
+  {% elif provider_request and provider_request.status == 'pending' %}
+  <div class="card join-card">
+    <p class="signed-in">Registrado como <strong>{{ applicant }}</strong></p>
+    <h3>📝 La solicitud de {{ provider_request.trade_name }} está en revisión</h3>
+    <p class="muted">Nuestro equipo revisa los datos de la empresa. Te escribimos a este correo con la respuesta.</p>
+  </div>
+
+  {% else %}
+  <div class="card join-card">
+    <div class="signed-in">✅ Correo confirmado: <strong>{{ applicant }}</strong>
+      <form method="post" action="/registro/salir" class="inline-form"><button type="submit" class="link-btn">Cambiar</button></form>
+    </div>
+    {% if provider_request and provider_request.status == 'rejected' %}
+    <p class="alert">La solicitud anterior de {{ provider_request.trade_name }} no fue aprobada. Motivo: {{ provider_request.rejection_reason }}. Puedes corregir y enviar otra.</p>
+    {% endif %}
+    <details class="unfold"{% if provider_errors %} open{% endif %}>
+      <summary class="btn btn-primary">Llenar la solicitud de proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></summary>
+      <form method="post" action="/proveedor/solicitud" class="request-form form-grid unfold-body" novalidate>
+        {% for error in provider_errors %}<p class="alert wide">{{ error }}</p>{% endfor %}
+        <h4 class="wide form-section">La empresa</h4>
+        <label>Razón social <span class="hint">como aparece en el RUT</span><input name="legal_name" value="{{ provider_form.legal_name or '' }}" maxlength="200" required></label>
+        <label>Nombre comercial<input name="trade_name" value="{{ provider_form.trade_name or '' }}" maxlength="160" required></label>
+        <label>NIT <span class="hint">con dígito de verificación</span><input name="nit" value="{{ provider_form.nit or '' }}" maxlength="20" placeholder="900123456-8" required></label>
+        <label>Matrícula mercantil <span class="hint">Cámara de Comercio</span><input name="chamber_registration" value="{{ provider_form.chamber_registration or '' }}" maxlength="40" inputmode="numeric" required></label>
+        <label>Representante legal<input name="legal_rep_name" value="{{ provider_form.legal_rep_name or '' }}" maxlength="160" required></label>
+        <label>Cédula del representante legal<input name="legal_rep_document" value="{{ provider_form.legal_rep_document or '' }}" maxlength="20" inputmode="numeric" required></label>
+        <label>Ciudad de la sede<input name="city" value="{{ provider_form.city or '' }}" maxlength="80" required></label>
+        <label>Dirección de la sede<input name="address" value="{{ provider_form.address or '' }}" maxlength="200" required></label>
+        <label class="wide">Página web <span class="hint">opcional</span><input name="website" value="{{ provider_form.website or '' }}" maxlength="255" placeholder="https://"></label>
+
+        <h4 class="wide form-section">Contacto</h4>
+        <label>Nombre<input name="contact_name" value="{{ provider_form.contact_name or '' }}" maxlength="160" required></label>
+        <label>Cargo<input name="contact_role" value="{{ provider_form.contact_role or '' }}" maxlength="80" placeholder="Gerente comercial" required></label>
+        <label>Celular<input name="contact_phone" value="{{ provider_form.contact_phone or '' }}" inputmode="tel" maxlength="24" placeholder="300 123 4567" required></label>
+        <label>Correo<input value="{{ applicant }}" disabled></label>
+
+        <h4 class="wide form-section">Lo que vendes y dónde</h4>
+        <fieldset class="wide">
+          <legend>Categorías que vendes</legend>
+          <div class="day-options">
+            {% set chosen = provider_form.categories or [] %}
+            {% for key, label in provider_categories.items() %}
+            <label class="day-option"><input type="checkbox" name="categories" value="{{ key }}"{% if key in chosen %} checked{% endif %}><span>{{ label }}</span></label>
+            {% endfor %}
+          </div>
+          <p class="hint" style="margin-top:0.5rem">Licores y cigarrillos son de venta regulada: los revisamos con más cuidado.</p>
+        </fieldset>
+        <label class="wide">Ciudades o municipios donde repartes<input name="coverage" value="{{ provider_form.coverage or '' }}" maxlength="500" placeholder="Bucaramanga, Floridablanca, Girón, Piedecuesta" required></label>
+        <label>Vehículos de reparto<input name="vehicles" value="{{ provider_form.vehicles or '' }}" inputmode="numeric" maxlength="6" required></label>
+        <label>Tiendas que atiendes (aprox.)<input name="stores_estimate" value="{{ provider_form.stores_estimate or '' }}" inputmode="numeric" maxlength="8" required></label>
+
+        <label class="wide consent">
+          <input type="checkbox" name="documents"{% if provider_form.documents == 'on' %} checked{% endif %} required>
+          <span>La empresa tiene el RUT y el certificado de Cámara de Comercio vigentes, y los enviaremos si TenderoBot los pide.</span>
+        </label>
+        <label class="wide consent">
+          <input type="checkbox" name="consent"{% if provider_form.consent == 'on' %} checked{% endif %} required>
+          <span>Autorizo a TenderoBot a usar estos datos para revisar la solicitud y, si la aprueban, para operar la cuenta de proveedor (Ley 1581 de 2012).</span>
+        </label>
+        <label class="trap" aria-hidden="true">No llenar<input name="website_url" tabindex="-1" autocomplete="off"></label>
+        <div class="actions wide">
+          <button type="submit" class="primary">Enviar solicitud <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+        </div>
+      </form>
+    </details>
+  </div>
+  {% endif %}
 </section>
 
 <footer class="site-footer reveal">
@@ -189,6 +316,7 @@
 {% block scripts %}
 <script src="/panel/static/store-map.js?v={{ static_version }}" defer></script>
 <script>
-  {% if errors or register_errors %}var form = document.getElementById("solicitar"); form.classList.add("in"); form.scrollIntoView({ behavior: "instant" });{% endif %}
+  {% set target = "distribuidores" if provider_errors or register_for == "proveedor" else ("solicitar" if errors or register_errors else "") %}
+  {% if target %}var form = document.getElementById("{{ target }}"); form.classList.add("in"); form.scrollIntoView({ behavior: "instant" });{% endif %}
 </script>
 {% endblock %}

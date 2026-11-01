@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% import "_provider_fields.html" as fields %}
+{% block title %}{{ provider.name }}{% endblock %}
+{% block content %}
+<p class="crumb"><a href="/admin/proveedores">← Proveedores</a></p>
+<header class="page-head">
+  <span class="eyebrow">{{ provider.legal_name or 'Proveedor' }}</span>
+  <h1>{{ provider.name }}</h1>
+  <div class="chips">
+    {% if provider.status == 'active' %}<span class="chip"><strong>Activo</strong></span>
+    {% else %}<span class="chip chip-risk">Suspendido: <strong>{{ provider.suspended_reason }}</strong></span>{% endif %}
+    <span class="chip">Tiendas <strong>{{ stores_linked }} / {{ stores_total }}</strong> usando el bot</span>
+    <span class="chip">Productos <strong>{{ products|length }}</strong></span>
+    {% if provider.nit %}<span class="chip">NIT <strong>{{ provider.nit }}</strong></span>{% endif %}
+  </div>
+</header>
+
+{% include "_admin_flash.html" %}
+{% for error in errors %}<p class="alert">{{ error }}</p>{% endfor %}
+
+{% set flagged = provider.categories|regulated %}
+<details class="card collapsible"{% if form %} open{% endif %}>
+  <summary>
+    <span>Datos de la empresa</span>
+    <span class="muted small">{{ (provider.categories|categories_label)|join(', ') or 'Sin categorías' }}{% if flagged %} · ⚠️ venta regulada{% endif %}</span>
+  </summary>
+  <form method="post" action="/admin/proveedores/{{ provider.id }}/datos" class="form-grid">
+    {{ fields.provider_fields(form or provider) }}
+    <div class="actions wide">
+      <button type="submit" class="primary">Guardar datos <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </div>
+  </form>
+</details>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Cuentas del panel</h2>
+    <span class="muted small">Cada cuenta crea su contraseña con un enlace por correo</span>
+  </div>
+  <div class="table-wrap">
+    <table style="min-width: 0">
+      <thead><tr><th>Correo</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td><strong>{{ user.email }}</strong></td>
+          <td>{% if user.activated_at %}<span class="badge badge-ok">Activa</span>{% else %}<span class="badge badge-muted">Sin crear contraseña</span>{% endif %}</td>
+          <td class="num">
+            <div class="row-actions">
+              <form method="post" action="/admin/proveedores/{{ provider.id }}/usuarios/{{ user.id }}/enlace" class="inline-form">
+                <button type="submit" class="small-btn">{{ 'Enviar enlace para cambiar contraseña' if user.activated_at else 'Reenviar enlace' }}</button>
+              </form>
+              {% if users|length > 1 %}
+              <form method="post" action="/admin/proveedores/{{ provider.id }}/usuarios/{{ user.id }}/eliminar" class="inline-form" onsubmit='return confirm({{ ("¿Quitar la cuenta " ~ user.email ~ "? Ya no podrá entrar al panel.")|tojson }})'>
+                <button type="submit" class="link-btn danger">Quitar</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/admin/proveedores/{{ provider.id }}/usuarios" class="form-grid add-user">
+    <label>Agregar otra cuenta<input name="email" type="email" maxlength="255" placeholder="ventas@empresa.co" required></label>
+    <div class="actions" style="align-items: flex-end">
+      <button type="submit" class="btn btn-ghost">Agregar cuenta</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" id="productos">
+  <div class="card-head">
+    <h2>Productos</h2>
+    <span class="muted small">Bloquea lo que no sea apropiado: sale del catálogo y del bot, y el proveedor no lo puede reactivar</span>
+  </div>
+  {% if products %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Producto</th><th class="num">Precio</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for p in products %}
+        <tr class="{{ 'inactive' if not p.active and not p.blocked_at }}">
+          <td><strong>{{ p.name }}</strong><br><span class="muted small">{{ p.sku }} · {{ p.presentation }}</span></td>
+          <td class="num">{{ p.unit_price|cop }}</td>
+          <td>{% if p.blocked_at %}<span class="badge badge-risk">Bloqueado</span><br><span class="muted small">{{ p.blocked_reason }}</span>
+              {% elif p.active %}<span class="badge badge-ok">A la venta</span>{% else %}<span class="badge badge-muted">Inactivo</span>{% endif %}</td>
+          <td class="num">
+            {% if p.blocked_at %}
+            <form method="post" action="/admin/proveedores/{{ provider.id }}/productos/{{ p.id }}/desbloquear" class="inline-form">
+              <button type="submit" class="small-btn">Desbloquear</button>
+            </form>
+            {% else %}
+            <details class="block-form">
+              <summary class="small-btn">Bloquear</summary>
+              <form method="post" action="/admin/proveedores/{{ provider.id }}/productos/{{ p.id }}/bloquear">
+                <input name="reason" maxlength="300" placeholder="Motivo (lo ve el proveedor)" required>
+                <button type="submit" class="small-btn danger">Bloquear</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Este proveedor aún no tiene productos.</p>
+  {% endif %}
+</section>
+
+<section class="card danger-zone">
+  <div class="card-head"><h2>Zona de cuidado</h2></div>
+  <div class="decision">
+    {% if provider.status == 'active' %}
+    <form method="post" action="/admin/proveedores/{{ provider.id }}/suspender" class="form-grid">
+      <h3 class="wide">Suspender</h3>
+      <p class="wide muted small">No entra al panel y sus tenderos no pueden usar el bot. No se borra nada; se puede reactivar.</p>
+      <label class="wide">Motivo<input name="reason" maxlength="300" placeholder="Por ejemplo: falta de pago" required></label>
+      <div class="actions wide"><button type="submit" class="btn btn-ghost">Suspender proveedor</button></div>
+    </form>
+    {% else %}
+    <form method="post" action="/admin/proveedores/{{ provider.id }}/reactivar" class="form-grid">
+      <h3 class="wide">Reactivar</h3>
+      <p class="wide muted small">Vuelve a entrar al panel y sus tenderos vuelven a usar el bot.</p>
+      <div class="actions wide"><button type="submit" class="primary">Reactivar proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></button></div>
+    </form>
+    {% endif %}
+    <form method="post" action="/admin/proveedores/{{ provider.id }}/eliminar" class="form-grid">
+      <h3 class="wide">Eliminar</h3>
+      <p class="wide muted small">Borra el proveedor con sus tiendas, productos, ventas, pedidos y cuentas. <strong>No se puede deshacer.</strong></p>
+      <label class="wide"><span>Escribe <strong>{{ provider.name }}</strong> para confirmar</span><input name="confirm" autocomplete="off" required></label>
+      <div class="actions wide"><button type="submit" class="btn btn-ghost danger">Eliminar para siempre</button></div>
+    </form>
+  </div>
+</section>
+{% endblock %}

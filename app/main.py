@@ -14,6 +14,8 @@ from telegram.ext import Application
 from app.bot.handlers import register_handlers
 from app.bot.reminders import reminder_loop
 from app.config import get_settings
+from app.web.admin import router as admin_router
+from app.web.login import router as login_router
 from app.web.public import router as public_router
 from app.web.routes import router as panel_router
 
@@ -90,7 +92,9 @@ app.add_middleware(
     https_only=settings.public_base_url.startswith("https"),
 )
 app.include_router(public_router)
+app.include_router(login_router)
 app.include_router(panel_router)
+app.include_router(admin_router)
 app.mount(
     "/panel/static",
     StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),

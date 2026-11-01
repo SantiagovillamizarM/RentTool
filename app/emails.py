@@ -91,3 +91,38 @@ def rejected_email(owner: str, store_name: str, reason: str, page: str) -> Email
             title="Tu solicitud no fue aprobada", preheader=f"Motivo: {reason}",
         ),
     )
+
+
+def provider_link_email(owner: str, company: str, link: str, purpose: str, approved: bool = False) -> Email:
+    """Enlace para crear o cambiar la contraseña del panel del proveedor."""
+    if purpose == "activate":
+        subject = "✅ Bienvenido a TenderoBot: crea tu contraseña" if approved else "Tu cuenta del panel de TenderoBot"
+        title = f"¡{company} ya es proveedor en TenderoBot!" if approved else "Tienes una cuenta en el panel"
+        intro = (
+            f"Aprobamos la solicitud de {company}. Crea tu contraseña para entrar al panel: ahí cargas tu catálogo, "
+            "registras tus tiendas y recibes sus pedidos."
+            if approved
+            else f"Te crearon una cuenta en el panel de {company} en TenderoBot. Crea tu contraseña para entrar."
+        )
+        button, expires = "Crear mi contraseña", "7 días"
+    else:
+        subject, title = "Cambia tu contraseña de TenderoBot", "Cambia tu contraseña"
+        intro = f"Pidieron un enlace para cambiar la contraseña de tu cuenta de {company} en TenderoBot."
+        button, expires = "Cambiar mi contraseña", "24 horas"
+    return Email(
+        subject,
+        f"Hola, {owner}.\n\n{intro}\n\n{button}: {link}\n\nEl enlace sirve una vez y vence en {expires}.\n\n— TenderoBot",
+        _render("provider_link", subject, name=owner, title=title, intro=intro, link=link, button=button,
+                expires=expires, preheader=intro[:90]),
+    )
+
+
+def provider_rejected_email(owner: str, company: str, reason: str) -> Email:
+    subject = "Tu solicitud de proveedor en TenderoBot no fue aprobada"
+    return Email(
+        subject,
+        f"Hola, {owner}.\n\nRevisamos la solicitud de {company} y por ahora no fue aprobada.\nMotivo: {reason}\n\n"
+        "Si lo puedes corregir, envía una solicitud nueva desde la página de TenderoBot.\n\n— TenderoBot",
+        _render("rejected", subject, name=owner, store_name=company, reason=reason, page="",
+                title="Tu solicitud de proveedor no fue aprobada", preheader=f"Motivo: {reason}"),
+    )

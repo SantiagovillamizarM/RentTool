@@ -12,6 +12,10 @@ ASK_LOGIN = (
 )
 CONTACT_NOT_YOURS = "Ese no es tu número. Toca el botón 📱 Compartir mi número para mandar el tuyo."
 PHONE_VERIFIED = "✅ Número verificado."
+PROVIDER_SUSPENDED = (
+    "⏸️ Tu proveedor está suspendido en TenderoBot por ahora, así que no puedo registrar ventas ni pedidos.\n"
+    "Tus datos siguen guardados. Comunícate con tu proveedor."
+)
 REQUEST_IN_REVIEW = (
     "📝 Tu solicitud está en revisión.\n\n"
     "Tu distribuidor está revisando tus datos y si su camión llega hasta tu tienda. "

@@ -135,11 +135,11 @@ async def test_panel_without_session_redirects_to_login():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/panel")
         assert response.status_code == 303
-        assert response.headers["location"] == "/panel/login"
+        assert response.headers["location"] == "/login"
 
-        login_page = await client.get("/panel/login")
+        login_page = await client.get("/login")
         assert login_page.status_code == 200
-        assert "Ingresar" in login_page.text
+        assert "Iniciar sesión" in login_page.text and "¿Eres tendero?" in login_page.text
 
         css = await client.get("/panel/static/panel.css")
         assert css.status_code == 200
@@ -204,15 +204,15 @@ async def test_login_shows_countdown_overlay_when_blocked():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        assert 'id="lock"' not in (await client.get("/panel/login")).text
+        assert 'id="lock"' not in (await client.get("/login")).text
         saved = login_limiter._hits.pop("127.0.0.1", None)
         try:
             for _ in range(login_limiter.max_attempts):
                 login_limiter.allow("127.0.0.1")
-            page = await client.get("/panel/login")
+            page = await client.get("/login")
             assert 'id="lock"' in page.text
             assert "Demasiados intentos" in page.text
-            blocked = await client.post("/panel/login", data={"email": "x@x.co", "password": "x"})
+            blocked = await client.post("/login", data={"email": "x@x.co", "password": "x"})
             assert blocked.status_code == 429
             assert 'id="lock"' in blocked.text
         finally:
@@ -259,7 +259,7 @@ async def test_live_version_requires_login():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/panel/actualizacion")
     assert response.status_code == 303
-    assert response.headers["location"] == "/panel/login"
+    assert response.headers["location"] == "/login"
 
 
 # --- Celular del tendero -----------------------------------------------------
@@ -295,4 +295,119 @@ async def test_store_phone_requires_login():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/panel/tiendas/1/celular", data={"phone": "3001234567"})
         assert response.status_code == 303
-        assert response.headers["location"] == "/panel/login"
+        assert response.headers["location"] == "/login"
+
+
+# --- Contraseñas del panel ----------------------------------------------------
+
+
+def test_password_rules():
+    from app.web.auth import is_blocked_password, password_problem
+
+    assert password_problem("demo1234") == "Esa es una contraseña de prueba o muy conocida."
+    assert password_problem("corta123") == "La contraseña debe tener al menos 12 caracteres."
+    assert password_problem("Tienda-del-barrio-2026") is None
+    assert is_blocked_password(" DEMO1234 ")
+    assert not is_blocked_password("Tienda-del-barrio-2026")
+
+
+async def _login_with(password_hash: str, password: str):
+    from types import SimpleNamespace
+
+    from app.db import get_session
+    from app.main import app
+
+    user = SimpleNamespace(id=1, distributor_id=1, email="demo@demo.co", password_hash=password_hash)
+
+    class UserSession:
+        # Primero se busca como administrador (no es), luego como proveedor y el estado de su proveedor.
+        answers = [None, user, "active"]
+
+        async def scalar(self, statement):
+            return self.answers.pop(0)
+
+    async def fake_session():
+        yield UserSession()
+
+    app.dependency_overrides[get_session] = fake_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/login", data={"email": "demo@demo.co", "password": password})
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_test_password_cannot_enter_the_panel_even_if_correct():
+    import bcrypt
+
+    weak = bcrypt.hashpw(b"demo1234", bcrypt.gensalt()).decode("utf-8")
+    response = await _login_with(weak, "demo1234")
+    assert response.status_code == 403
+    assert "contraseña de prueba" in response.text
+    assert "python -m scripts.panel_user" in response.text
+
+
+@pytest.mark.asyncio
+async def test_strong_password_enters_the_panel():
+    import bcrypt
+
+    strong = bcrypt.hashpw(b"Tienda-del-barrio-2026", bcrypt.gensalt()).decode("utf-8")
+    response = await _login_with(strong, "Tienda-del-barrio-2026")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/panel"
+
+
+def test_public_templates_have_no_broken_placeholders():
+    """Ninguna plantilla muestra una variable sin llenar (p. ej. "{ applicant }" con llaves sencillas)."""
+    import re
+    from pathlib import Path
+
+    from app.providers import CATEGORIES
+    from app.web.routes import templates
+    from app.web.store_forms import PAYMENT_METHODS
+
+    html = templates.env.get_template("landing.html").render(
+        distributors=[], payment_methods=PAYMENT_METHODS, form={}, errors=[], register_errors=[], register_email="",
+        register_for="", applicant="tendero@gmail.com", role="provider", existing=None, provider_request=None,
+        provider_account=1, provider_form={}, provider_errors=[], provider_categories=CATEGORIES, bot_link="",
+        static_version=1,
+    )
+    assert "tendero@gmail.com" in html
+    assert not re.search(r"\{\s*[a-z_]+\s*\}", re.sub(r"<script.*?</script>|<style.*?</style>", "", html, flags=re.S))
+    for template in Path("app/web/templates").rglob("*.html"):
+        assert not re.search(r"(?<!\{)\{ [a-z_.]+ \}(?!\})", template.read_text(encoding="utf-8")), template
+
+
+@pytest.mark.asyncio
+async def test_single_login_sends_the_admin_to_admin():
+    from types import SimpleNamespace
+
+    import bcrypt
+
+    from app.db import get_session
+    from app.main import app
+
+    admin = SimpleNamespace(id=1, email="admin@tenderobot.co",
+                            password_hash=bcrypt.hashpw(b"Admin-de-prueba-2026", bcrypt.gensalt()).decode("utf-8"))
+
+    class AdminSession:
+        answers = [admin, None]  # es administrador; no es proveedor
+
+        async def scalar(self, statement):
+            return self.answers.pop(0)
+
+    async def fake_session():
+        yield AdminSession()
+
+    app.dependency_overrides[get_session] = fake_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/login", data={"email": admin.email, "password": "Admin-de-prueba-2026"})
+            assert response.status_code == 303 and response.headers["location"] == "/admin"
+            for old in ("/panel/login", "/admin/login", "/entrar"):
+                assert (await client.get(old)).headers["location"] == "/login"
+    finally:
+        app.dependency_overrides.clear()

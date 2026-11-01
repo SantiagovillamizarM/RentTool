@@ -1,0 +1,9 @@
+{% extends "email/base.html" %}
+{% import "email/_parts.html" as parts %}
+{% block body %}
+<p style="margin:0;">{{ intro }}</p>
+{{ parts.button(link, button) }}
+{{ parts.note("⏳ Este enlace sirve una sola vez y vence en " ~ expires ~ ". Si vence, pídele uno nuevo al administrador de TenderoBot.") }}
+<p style="margin:16px 0 0; font-size:13px; color:#6b7895;">Si el botón no abre, copia este enlace en el navegador:<br><span style="word-break:break-all; color:#3a4661;">{{ link }}</span></p>
+{% endblock %}
+{% block footer %}Nadie de TenderoBot te va a pedir tu contraseña. Si no esperabas este correo, ignóralo.{% endblock %}

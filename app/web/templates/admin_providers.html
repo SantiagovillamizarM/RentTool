@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% import "_provider_fields.html" as fields %}
+{% block title %}Proveedores{% endblock %}
+{% block content %}
+<header class="page-head">
+  <span class="eyebrow">Proveedores</span>
+  <h1>Cada proveedor, <span class="accent">sus tiendas</span></h1>
+  <p>Llegan por <a href="/admin/solicitudes">Solicitudes</a> o los agregas tú. Cada uno ve solo sus tiendas, productos y pedidos.</p>
+</header>
+
+{% include "_admin_flash.html" %}
+
+<details class="card collapsible"{% if create_errors %} open{% endif %}>
+  <summary><span>Agregar proveedor</span><span class="muted small">Sin solicitud: le llega un enlace para crear su contraseña</span></summary>
+  {% for error in create_errors %}<p class="alert">{{ error }}</p>{% endfor %}
+  <form method="post" action="/admin/proveedores/nuevo" class="form-grid">
+    {{ fields.provider_fields(form, login_email=True) }}
+    <div class="actions wide">
+      <button type="submit" class="primary">Crear proveedor <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+    </div>
+  </form>
+</details>
+
+<section class="card">
+  {% if providers %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Proveedor</th><th>Estado</th><th>NIT</th><th class="num">Tiendas</th><th class="num">Productos</th><th></th></tr></thead>
+      <tbody>
+        {% for row in providers %}
+        {% set p = row.provider %}
+        <tr>
+          <td>
+            <div class="name-cell">
+              <span class="avatar">{{ p.name[:1] }}</span>
+              <div><strong>{{ p.name }}</strong><span>{{ p.city or 'Sin ciudad' }}</span></div>
+            </div>
+          </td>
+          <td>{% if p.status == 'active' %}<span class="badge badge-ok">Activo</span>{% else %}<span class="badge badge-risk">Suspendido</span>{% endif %}</td>
+          <td class="muted">{{ p.nit or '—' }}</td>
+          <td class="num">{{ row.stores }}</td>
+          <td class="num">{{ row.products }}{% if row.blocked %} <span class="badge badge-risk">{{ row.blocked }} bloq.</span>{% endif %}</td>
+          <td class="num"><a class="row-link" href="/admin/proveedores/{{ p.id }}">Gestionar {{ icon.arrow() }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Aún no hay proveedores.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -27,13 +27,29 @@ class Base(DeclarativeBase):
 
 
 class Distributor(Base):
+    """Proveedor (distribuidor). Lo crea el administrador de TenderoBot, o lo aprueba desde una solicitud."""
+
     __tablename__ = "distributors"
+    __table_args__ = (CheckConstraint("status IN ('active', 'suspended')", name="ck_distributors_status"),)
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # Suspendido: no entra al panel y sus tenderos no pueden usar el bot hasta que se reactive.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
+    suspended_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Datos de la empresa (los del proveedor de prueba del seed quedan vacíos).
+    legal_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    coverage: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    categories: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     users: Mapped[list["DistributorUser"]] = relationship(back_populates="distributor")
     stores: Mapped[list["Store"]] = relationship(back_populates="distributor")
@@ -49,8 +65,84 @@ class DistributorUser(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # None mientras no haya creado su contraseña con el enlace del correo.
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="users")
+
+
+class AdminUser(Base):
+    """Administrador de TenderoBot: maneja proveedores. Solo se crea por comando (scripts/admin_user.py)."""
+
+    __tablename__ = "admin_users"
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PasswordToken(Base):
+    """Enlace de un solo uso para crear o cambiar la contraseña del panel. Solo se guarda el hash."""
+
+    __tablename__ = "password_tokens"
+    __table_args__ = (CheckConstraint("purpose IN ('activate', 'reset')", name="ck_password_tokens_purpose"),)
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("distributor_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DistributorRequest(Base):
+    """Solicitud de una empresa para ser proveedor en TenderoBot. La aprueba o rechaza el administrador."""
+
+    __tablename__ = "distributor_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_distributor_requests_status"),
+        Index(
+            "uq_distributor_requests_pending_email",
+            "contact_email",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    legal_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    trade_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    nit: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    chamber_registration: Mapped[str] = mapped_column(String(40), nullable=False)
+    legal_rep_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    legal_rep_document: Mapped[str] = mapped_column(String(20), nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    contact_role: Mapped[str] = mapped_column(String(80), nullable=False)
+    contact_phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    city: Mapped[str] = mapped_column(String(80), nullable=False)
+    address: Mapped[str] = mapped_column(String(200), nullable=False)
+    coverage: Mapped[str] = mapped_column(String(500), nullable=False)
+    categories: Mapped[str] = mapped_column(String(300), nullable=False)
+    vehicles: Mapped[int] = mapped_column(Integer, nullable=False)
+    stores_estimate: Mapped[int] = mapped_column(Integer, nullable=False)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    distributor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("distributors.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class Store(Base):
@@ -205,6 +297,9 @@ class Product(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Unidades que el distribuidor tiene para vender. None = no lleva la cuenta (sin límite).
     available_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Bloqueado por el administrador (no es apropiado): queda inactivo y el proveedor no lo puede reactivar.
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     distributor: Mapped[Distributor] = relationship(back_populates="products")
 

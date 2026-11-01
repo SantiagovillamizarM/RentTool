@@ -32,6 +32,7 @@ from app.db import SessionLocal
 from app.inventory.engine import delivery_schedule, load_store_analysis, parse_visit_weekdays
 from app.inventory.orders import apply_order_changes, cap_to_available, order_total, to_order_lines
 from app.models import (
+    Distributor,
     PendingAction,
     Product,
     Receipt,
@@ -182,6 +183,9 @@ async def require_ready_store(update: Update, session: AsyncSession) -> Store | 
     if store.delivery_days_set_at is None:
         await _reply(update, texts.NEED_DAYS)
         await ask_days(update, store)
+        return None
+    if await session.scalar(select(Distributor.status).where(Distributor.id == store.distributor_id)) != "active":
+        await _reply(update, texts.PROVIDER_SUSPENDED)
         return None
     return store
 

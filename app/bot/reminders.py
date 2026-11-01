@@ -19,7 +19,7 @@ from telegram import Bot
 from app.bot import keyboards, texts
 from app.db import SessionLocal
 from app.inventory.engine import COLOMBIA_TZ, DeliverySchedule, delivery_schedule
-from app.models import Store, SuggestedOrder
+from app.models import Distributor, Store, SuggestedOrder
 from app.onboarding import send_request_followups
 
 REMINDER_HOUR = 9
@@ -47,10 +47,13 @@ async def send_due_reminders(bot: Bot, now: datetime | None = None) -> int:
     async with SessionLocal() as session:
         stores = (
             await session.scalars(
-                select(Store).where(
+                select(Store)
+                .join(Distributor, Distributor.id == Store.distributor_id)
+                .where(
                     Store.telegram_chat_id.is_not(None),
                     Store.consent_at.is_not(None),
                     Store.delivery_days_set_at.is_not(None),
+                    Distributor.status == "active",  # proveedor suspendido: sin recordatorios
                 )
             )
         ).all()

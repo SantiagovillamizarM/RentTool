@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icon %}
+{% block title %}Administración{% endblock %}
+{% block content %}
+<header class="page-head">
+  <span class="eyebrow">Administración</span>
+  <h1>Así va <span class="accent">TenderoBot</span></h1>
+  <p>Todos los proveedores y sus tiendas. Desde aquí apruebas proveedores nuevos, manejas sus cuentas y revisas lo que venden.</p>
+</header>
+
+{% include "_admin_flash.html" %}
+
+<div class="kpis">
+  <a class="kpi kpi-link" href="/admin/proveedores">
+    <span class="kpi-icon">{{ icon.truck() }}</span>
+    <span class="kpi-label">Proveedores activos</span>
+    <span class="kpi-value" data-count="{{ providers_active }}">{{ providers_active }}</span>
+    <span class="kpi-note">{{ providers_suspended }} suspendido{{ '' if providers_suspended == 1 else 's' }}</span>
+  </a>
+  <a class="kpi kpi-link {{ 'kpi-featured' if provider_requests }}" href="/admin/solicitudes">
+    <span class="kpi-icon">{{ icon.alert() }}</span>
+    <span class="kpi-label">Solicitudes de proveedores</span>
+    <span class="kpi-value" data-count="{{ provider_requests }}">{{ provider_requests }}</span>
+    <span class="kpi-note">esperando tu respuesta</span>
+  </a>
+  <div class="kpi">
+    <span class="kpi-icon">{{ icon.store() }}</span>
+    <span class="kpi-label">Tiendas</span>
+    <span class="kpi-value"><span data-count="{{ stores_linked }}">{{ stores_linked }}</span> <small>/ {{ stores_total }}</small></span>
+    <span class="kpi-note">usando el bot · {{ store_requests }} solicitud{{ '' if store_requests == 1 else 'es' }} de tenderos en revisión</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-icon">{{ icon.box() }}</span>
+    <span class="kpi-label">Pedidos de los últimos {{ orders_days }} días</span>
+    <span class="kpi-value" data-count="{{ orders_value|round|int }}" data-prefix="$ ">{{ orders_value|cop }}</span>
+    <span class="kpi-note">{{ orders_count }} pedido{{ '' if orders_count == 1 else 's' }} enviado{{ '' if orders_count == 1 else 's' }} desde el bot</span>
+  </div>
+</div>
+
+{% if blocked_products %}
+<section class="card">
+  <p class="muted" style="margin:0">{{ blocked_products }} producto{{ '' if blocked_products == 1 else 's' }} bloqueado{{ '' if blocked_products == 1 else 's' }} por no ser apropiado{{ '' if blocked_products == 1 else 's' }}. Se revisan en cada <a href="/admin/proveedores">proveedor</a>.</p>
+</section>
+{% endif %}
+{% endblock %}

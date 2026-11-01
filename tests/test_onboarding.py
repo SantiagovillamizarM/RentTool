@@ -304,7 +304,7 @@ async def test_request_pages_need_login():
         ]:
             response = await client.request(method, path)
             assert response.status_code == 303, path
-            assert response.headers["location"] == "/panel/login"
+            assert response.headers["location"] == "/login"
 
 
 def test_texts_for_requests():

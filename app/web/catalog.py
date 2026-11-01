@@ -77,7 +77,8 @@ def plan_catalog_changes(products, form: dict[str, str]) -> CatalogPlan:
             plan.errors.append(f"{product.name}: {exc}")
             plan.error_ids.add(pid)
             continue
-        active = form.get(f"active-{pid}") == "on"
+        # Bloqueado por el administrador de TenderoBot: sigue inactivo aunque marquen "activo".
+        active = form.get(f"active-{pid}") == "on" and getattr(product, "blocked_at", None) is None
         old_price = Decimal(product.unit_price)
         if (price, available, active) == (old_price, product.available_units, product.active):
             continue

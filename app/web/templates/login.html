@@ -1,36 +1,51 @@
 {% extends "base.html" %}
 {% import "_icons.html" as icon %}
-{% block title %}Ingresar{% endblock %}
+{% block title %}Iniciar sesión{% endblock %}
 {% block content %}
 <div class="login">
   <section class="login-hero">
     <div class="login-orb"></div>
-    <a class="brand" href="/panel/login">
+    <a class="brand" href="/">
       <img src="/panel/static/logo.png" alt="">
-      <span>TenderoBot<small>Panel del distribuidor</small></span>
+      <span>TenderoBot<small>Inventario y pedidos para tiendas de barrio</small></span>
     </a>
-    <span class="eyebrow">Inventario con IA para tiendas de barrio</span>
-    <h1>Tus tiendas, <span class="accent">siempre surtidas.</span></h1>
-    <p>Mira qué se les va a acabar a tus tenderos, qué no se vende y cuánto vas a despachar la próxima semana. Los datos llegan solos desde Telegram.</p>
+    <span class="eyebrow">Iniciar sesión</span>
+    <h1>Bienvenido a <span class="accent">TenderoBot.</span></h1>
+    <p>Un solo lugar para entrar. Con tu correo y contraseña te llevamos a tu panel: el de tu empresa si eres proveedor, o el de administración.</p>
     <div class="feature-row">
-      <div class="feature">{{ icon.mic() }}<strong>Ventas por voz</strong><span>El tendero dice lo que vendió</span></div>
-      <div class="feature">{{ icon.camera() }}<strong>Foto del estante</strong><span>Conteo en segundos</span></div>
-      <div class="feature">{{ icon.truck() }}<strong>Pedido sugerido</strong><span>Solo lo que hace falta</span></div>
+      <div class="feature">{{ icon.truck() }}<strong>Proveedores</strong><span>Catálogo, tiendas y pedidos</span></div>
+      <div class="feature">{{ icon.store() }}<strong>Tenderos</strong><span>Entran por Telegram</span></div>
+      <div class="feature">{{ icon.box() }}<strong>Pedidos</strong><span>Armados y en cajas</span></div>
     </div>
   </section>
 
   <section class="login-card">
-    <h2>Ingresar</h2>
-    <p>Usa tu cuenta de distribuidor.</p>
+    <h2>Iniciar sesión</h2>
+    <p>Proveedores y administradores.</p>
     {% if error %}<p class="alert">{{ error }}</p>{% endif %}
-    <form method="post" action="/panel/login">
+    <form method="post" action="/login">
       <label for="email">Correo</label>
-      <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" placeholder="tu@empresa.co" required>
+      <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" placeholder="tu@correo.com" required>
       <label for="password">Contraseña</label>
       <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
-      <button type="submit" class="primary" {{ 'disabled' if retry_after }}>Entrar al panel <span class="btn-arrow">{{ icon.arrow() }}</span></button>
+      <button type="submit" class="primary" {{ 'disabled' if retry_after }}>Entrar <span class="btn-arrow">{{ icon.arrow() }}</span></button>
     </form>
-    <p class="login-foot">Cada distribuidor ve solo sus tiendas.</p>
+
+    <div class="login-alt">
+      <h3>¿Eres tendero?</h3>
+      <p>No necesitas contraseña: usas TenderoBot desde Telegram compartiendo tu celular.</p>
+      {% if bot_link %}<a href="{{ bot_link }}" class="btn btn-ghost" target="_blank" rel="noopener">Abrir el bot en Telegram</a>{% endif %}
+      <details class="unfold">
+        <summary class="link-btn">Ver cómo va mi solicitud con un código al correo</summary>
+        <form method="post" action="/registro" class="code-login">
+          <input name="email" type="email" autocomplete="email" placeholder="tu@correo.com" aria-label="Tu correo" required>
+          <label class="trap" aria-hidden="true">No llenar<input name="website" tabindex="-1" autocomplete="off"></label>
+          <button type="submit" class="small-btn">Enviarme el código</button>
+        </form>
+      </details>
+    </div>
+
+    <p class="login-foot">¿Aún no usas TenderoBot? <a href="/#solicitar">Pide acceso para tu tienda</a> o <a href="/#distribuidores">registra tu empresa</a>.</p>
   </section>
 </div>
 

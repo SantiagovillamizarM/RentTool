@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     grok_model: str = "grok-4.20-0309-non-reasoning"
     bot_mode: str = "polling"
     session_secret: str = "dev-session-secret-change-me"
-    demo_password: str = "demo1234"
+    # Cuenta del panel que crea el seed. Sin valores por defecto: nada de contraseñas publicadas.
+    panel_email: str = ""
+    panel_password: str = Field("", validation_alias=AliasChoices("PANEL_PASSWORD", "DEMO_PASSWORD"))
     # Correo de respaldo para tenderos que no abren el bot. Vacío = no se mandan correos.
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587

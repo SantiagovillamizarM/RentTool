@@ -31,9 +31,9 @@ from app.models import (
     SuggestedOrder,
     SuggestedOrderItem,
 )
+from app.web.auth import password_problem
 
 DISTRIBUTOR_NAME = "Distribuidora El Barrio"
-DEMO_EMAIL = "demo@demo.co"
 
 # (sku, nombre, otros nombres, presentación, unidades por caja, precio por unidad)
 PRODUCTS = [
@@ -243,8 +243,8 @@ async def seed(session: AsyncSession, demo_history: bool = False) -> None:
     session.add(
         DistributorUser(
             distributor_id=distributor.id,
-            email=DEMO_EMAIL,
-            password_hash=hash_password(settings.demo_password),
+            email=settings.panel_email.strip().lower(),
+            password_hash=hash_password(settings.panel_password),
         )
     )
 
@@ -297,11 +297,17 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Carga los datos base de TenderoBot.")
     parser.add_argument("--demo", action="store_true", help="crea además 60 días de historia inventada")
     args = parser.parse_args()
+    settings = get_settings()
+    # La cuenta del panel sale del .env y con contraseña fuerte: nunca una de prueba publicada.
+    problem = None if settings.panel_email.strip() else "Falta PANEL_EMAIL en el .env."
+    problem = problem or password_problem(settings.panel_password)
+    if problem:
+        raise SystemExit(f"No se cargó nada. {problem} Pon PANEL_EMAIL y PANEL_PASSWORD en el .env.")
     async with SessionLocal() as session:
         await seed(session, demo_history=args.demo)
     await engine.dispose()
     history = f"{HISTORY_DAYS} días de historia de prueba" if args.demo else "sin ventas"
-    print(f"Listo: {DEMO_EMAIL} / {len(STORES)} tiendas sin vincular / {len(PRODUCTS)} productos / {history}")
+    print(f"Listo: panel {settings.panel_email} / {len(STORES)} tiendas sin vincular / {len(PRODUCTS)} productos / {history}")
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@
               <div>
                 <strong>{{ p.name }}</strong>
                 {% if p.active and p.available_units is not none and p.available_units < p.units_per_case %}<span class="badge badge-risk">Agotado</span>{% endif %}
+                {% if p.blocked_at %}<span class="badge badge-risk" title="{{ p.blocked_reason }}">Bloqueado por TenderoBot</span>{% endif %}
                 <span class="muted small sku">{{ p.sku }} · {{ p.presentation }}</span>
               </div>
             </div>
@@ -55,7 +56,8 @@
           <td class="num muted">{{ p.units_per_case }}</td>
           <td><input name="{{ price_key }}" value="{{ submitted.get(price_key, p.unit_price|int) }}" data-initial="{{ p.unit_price|int }}" inputmode="numeric" class="cell-input" aria-label="Precio de {{ p.name }}"></td>
           <td><input name="{{ available_key }}" value="{{ submitted.get(available_key, initial_available) }}" data-initial="{{ initial_available }}" inputmode="numeric" class="cell-input" placeholder="Sin límite" aria-label="Disponible de {{ p.name }}"></td>
-          <td><label class="switch"><input type="checkbox" name="active-{{ p.id }}" {{ 'checked' if is_active }} data-initial="{{ 'on' if p.active else '' }}" aria-label="{{ p.name }} activo"><span></span></label></td>
+          <td>{% if p.blocked_at %}<span class="muted small" title="{{ p.blocked_reason }}">Bloqueado: {{ p.blocked_reason }}</span>
+              {% else %}<label class="switch"><input type="checkbox" name="active-{{ p.id }}" {{ 'checked' if is_active }} data-initial="{{ 'on' if p.active else '' }}" aria-label="{{ p.name }} activo"><span></span></label>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

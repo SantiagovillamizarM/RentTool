@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,6 +22,8 @@ from app.inventory.engine import (
     parse_visit_weekdays,
 )
 from app.models import (
+    Distributor,
+    DistributorUser,
     Product,
     Receipt,
     Sale,
@@ -45,17 +49,16 @@ from app.hours import (
     window_label,
 )
 from app.web.store_forms import PAYMENT_METHODS, parse_store_form
+from app.providers import find_token
 from app.web.auth import (
-    authenticate,
-    client_ip,
-    login_limiter,
+    MIN_PASSWORD_LENGTH,
     login_session,
     logout_session,
+    password_problem,
     require_distributor,
 )
 
 CHART_DAYS = 28
-LOGIN_ERROR = "Correo o contraseña incorrectos."
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["cop"] = formatting.cop
@@ -130,40 +133,51 @@ async def _sent_orders(session: AsyncSession, distributor_id: int, store_id: int
     ]
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_form(request: Request):
-    if isinstance(request.session.get("distributor_id"), int):
-        return RedirectResponse("/panel", status_code=status.HTTP_303_SEE_OTHER)
-    # Si recarga mientras está bloqueado, sigue viendo el contador.
-    retry_after = login_limiter.retry_after(client_ip(request))
-    return templates.TemplateResponse(
-        request, "login.html", {"error": None, "email": "", "retry_after": retry_after}
-    )
+async def _token_user(session: AsyncSession, token: str):
+    found = await find_token(session, token)
+    user = await session.get(DistributorUser, found.user_id) if found else None
+    return found, user
 
 
-@router.post("/login", response_class=HTMLResponse)
-async def login_submit(
+def _activate_page(request: Request, found, user, error: str | None = None, status_code: int = status.HTTP_200_OK):
+    context = {
+        "valid": user is not None,
+        "email": user.email if user else "",
+        "purpose": found.purpose if found else "activate",
+        "error": error,
+        "min_length": MIN_PASSWORD_LENGTH,
+    }
+    return templates.TemplateResponse(request, "panel_activate.html", context, status_code=status_code)
+
+
+@router.get("/activar/{token}", response_class=HTMLResponse)
+async def activate_form(token: str, request: Request, session: AsyncSession = Depends(get_session)):
+    """Enlace del correo: el proveedor crea (o cambia) la contraseña de su cuenta del panel."""
+    found, user = await _token_user(session, token)
+    return _activate_page(request, found, user, status_code=status.HTTP_200_OK if user else status.HTTP_410_GONE)
+
+
+@router.post("/activar/{token}", response_class=HTMLResponse)
+async def activate_submit(
+    token: str,
     request: Request,
-    email: str = Form(""),
     password: str = Form(""),
+    confirm: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
-    ip = client_ip(request)
-    if not login_limiter.allow(ip):
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": None, "email": email, "retry_after": login_limiter.retry_after(ip)},
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        )
-    user = await authenticate(session, email, password)
+    found, user = await _token_user(session, token)
     if user is None:
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": LOGIN_ERROR, "email": email, "retry_after": 0},
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+        return _activate_page(request, found, user, status_code=status.HTTP_410_GONE)
+    problem = password_problem(password) or (None if password == confirm else "Las dos contraseñas no coinciden.")
+    if problem:
+        return _activate_page(request, found, user, problem, status.HTTP_400_BAD_REQUEST)
+    now = datetime.now(timezone.utc)
+    user.password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    user.activated_at = user.activated_at or now
+    found.used_at = now
+    await session.commit()
+    if await session.scalar(select(Distributor.status).where(Distributor.id == user.distributor_id)) != "active":
+        return RedirectResponse("/login?suspendido=1", status_code=status.HTTP_303_SEE_OTHER)
     login_session(request, user)
     return RedirectResponse("/panel", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -171,7 +185,7 @@ async def login_submit(
 @router.post("/logout")
 async def logout(request: Request):
     logout_session(request)
-    return RedirectResponse("/panel/login", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("", response_class=HTMLResponse)

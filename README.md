@@ -30,7 +30,11 @@ El tendero no lleva inventario porque le toma más tiempo del que tiene. Por eso
 | Escribe `/salir` | Cierra la sesión de la tienda en ese chat (pide confirmación). Los datos se conservan; para volver a entrar basta con compartir el número otra vez. Si entra otra cuenta de Telegram, se le pide su propia autorización de datos. |
 | No usa el bot en 24 horas | Le avisa, de día, que la sesión sigue abierta, con botones para cerrarla o seguir. Un solo aviso hasta que vuelva a usar el bot. |
 
-La raíz del sitio (`/`) es la **página pública**: explica qué hace TenderoBot y tiene el formulario para pedir acceso.
+La raíz del sitio (`/`) es la **página pública**: explica qué hace TenderoBot y tiene dos solicitudes, ambas después de confirmar el correo con un código: la de **tenderos** (la aprueba su proveedor) y la de **proveedores** (con NIT y dígito de verificación, matrícula mercantil, representante legal, cobertura y categorías; la aprueba el administrador).
+
+Hay **un solo login** en `/login`: proveedores y administrador entran con correo y contraseña y cada uno llega a su panel; los tenderos usan el bot y, para ver su solicitud, un código al correo.
+
+El **administrador de TenderoBot** tiene su panel en `/admin`: aprueba o rechaza proveedores, los crea, edita, suspende o elimina, maneja sus cuentas (enlaces por correo para crear o cambiar la contraseña; el administrador nunca la conoce) y bloquea productos que no sean apropiados. Un proveedor suspendido no entra a su panel y sus tenderos no pueden usar el bot. La cuenta de administrador solo se crea por comando: `python -m scripts.admin_user tu@correo.com`.
 
 El distribuidor tiene un **panel web** (`/panel`) con las **solicitudes** de tenderos nuevos (aprobar escogiendo los días de ruta, o rechazar con motivo), sus tiendas (también puede agregarlas a mano y editar sus datos), el resumen de sus tiendas, las alertas de cada una, el gráfico de ventas, la clasificación ABC y la demanda agregada de la próxima semana.
 
@@ -114,7 +118,8 @@ Con `BOT_MODE=polling` el bot funciona desde tu computador, sin desplegar nada.
 
 - **Bot:** pide acceso en http://localhost:8000 con tu celular y apruébalo en el panel (Solicitudes), o registra tu celular directamente (Tiendas → una tienda → Acceso al bot). Luego abre tu bot en Telegram, escribe `/start` y toca 📱 Compartir mi número.
 - **Datos reales:** el seed no inventa ventas, conteos ni pedidos. Todo lo que muestra el panel llega desde Telegram, y el panel se actualiza solo (indicador "En vivo"). Volver a correr el seed borra los datos del distribuidor, también los celulares registrados.
-- **Panel:** entra a http://localhost:8000/panel con `demo@demo.co` y la contraseña de `DEMO_PASSWORD`.
+- **Panel:** entra a http://localhost:8000/login con `PANEL_EMAIL` y `PANEL_PASSWORD` del `.env`. Para cambiarlos sin borrar datos: `python -m scripts.panel_user tu@correo.com` (pide la contraseña oculta). El login no deja entrar con contraseñas de prueba como `demo1234`.
+- **Administración:** crea tu cuenta con `python -m scripts.admin_user tu@correo.com` y entra a http://localhost:8000/login (el mismo login te lleva a `/admin`).
 - **Pruebas:** `python -m pytest`
 
 ### Variables de entorno
@@ -129,7 +134,7 @@ Con `BOT_MODE=polling` el bot funciona desde tu computador, sin desplegar nada.
 | `GROK_BASE_URL` | Por defecto `https://api.reto.pltk.mx/v1` |
 | `GROK_MODEL` | Por defecto `grok-4.20-0309-non-reasoning` |
 | `SESSION_SECRET` | Firma de la sesión del panel |
-| `DEMO_PASSWORD` | Contraseña del usuario de prueba del panel |
+| `PANEL_EMAIL`, `PANEL_PASSWORD` | Cuenta del panel que crea el seed (contraseña de 12 caracteres o más) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Correo de respaldo para tenderos que no abren el bot (gratis con Gmail y una contraseña de aplicación). Vacíos = no se mandan correos. |
 
 Las claves van solo en `.env`, que está en `.gitignore`. Nunca se suben al repositorio.

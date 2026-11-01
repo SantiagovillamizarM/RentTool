@@ -1059,7 +1059,7 @@ legend { padding: 0; margin-bottom: 0.5rem; font-weight: 550; font-size: 0.85rem
 
 @media (max-width: 640px) {
   .site-header { margin-bottom: 2rem; }
-  .site-nav a:not(.site-login) { display: none; }
+  .site-nav a:not(.site-login):not(.site-signin) { display: none; }
   .hero { gap: 2rem; margin-bottom: 3.5rem; }
   .steps { grid-template-columns: 1fr; }
   .landing-section { margin-bottom: 3.5rem; }
@@ -1320,3 +1320,63 @@ input[type="time"] { color-scheme: dark; font-variant-numeric: tabular-nums; }
 }
 
 .map.leaflet-container { background: #0b1630; }
+
+/* ---------------------------------------------------------------- Administración */
+
+.admin-pill {
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  background: rgba(246, 190, 69, 0.12);
+  border: 1px solid rgba(246, 190, 69, 0.35);
+}
+a.kpi-link { color: inherit; text-decoration: none; }
+a.kpi-link:hover { color: inherit; }
+.chip-risk { border-color: rgba(255, 125, 110, 0.4); color: #ffb3a8; }
+
+.flash { flex-direction: column; align-items: stretch; }
+.copy-link { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+.copy-link input { flex: 1; min-width: 0; font-size: 0.82rem; }
+
+.row-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem 0.9rem; }
+.add-user { margin-top: 1rem; }
+.link-btn.danger, .small-btn.danger, .btn.danger { color: #ff9b8f; }
+.btn.danger:hover, .small-btn.danger:hover { border-color: rgba(255, 125, 110, 0.6); }
+.danger-zone { border-color: rgba(255, 125, 110, 0.22); }
+
+.block-form { display: inline-block; text-align: left; }
+.block-form > summary { list-style: none; display: inline-flex; }
+.block-form > summary::-webkit-details-marker { display: none; }
+.block-form[open] > summary { display: none; }
+.block-form form { display: flex; gap: 0.4rem; align-items: center; }
+.block-form input { width: 14rem; padding: 0.4rem 0.7rem; font-size: 0.85rem; }
+
+.form-section {
+  margin: 0.5rem 0 -0.25rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.form-section:first-of-type { margin-top: 0; }
+input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .block-form input { width: 100%; }
+  .block-form form { flex-direction: column; align-items: stretch; }
+}
+
+.site-nav .site-signin { color: var(--text); }
+
+/* Login único: la parte de los tenderos, debajo del formulario */
+.login-alt { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--stroke); display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; }
+.login-alt h3 { font-size: 1rem; margin: 0; }
+.login-alt p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.login-alt .unfold > summary.link-btn { list-style: none; font-size: 0.85rem; }
+.login-alt .unfold[open] > summary { display: none; }
+.code-login { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+.code-login input[type="email"] { flex: 1; min-width: 0; }
+.login-card .login-alt .small-btn { white-space: nowrap; }

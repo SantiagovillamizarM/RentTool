@@ -1,0 +1,22 @@
+{#- Campos de un proveedor en el panel del administrador (crear y editar). `v` es un dict o el proveedor. -#}
+{% macro provider_fields(v, login_email=False) %}
+<label>Nombre comercial<input name="name" value="{{ v.name or '' }}" maxlength="160" required></label>
+<label>Razón social<input name="legal_name" value="{{ v.legal_name or '' }}" maxlength="200"></label>
+<label>NIT <span class="hint">con dígito de verificación</span><input name="nit" value="{{ v.nit or '' }}" maxlength="20" placeholder="900123456-8"></label>
+<label>Persona de contacto<input name="contact_name" value="{{ v.contact_name or '' }}" maxlength="160"></label>
+<label>Celular de contacto<input name="contact_phone" value="{{ v.contact_phone|phone if v.contact_phone and v.contact_phone.isdigit() else (v.contact_phone or '') }}" inputmode="tel" maxlength="24"></label>
+<label>Correo de contacto<input name="contact_email" type="email" value="{{ v.contact_email or '' }}" maxlength="255"></label>
+{% if login_email %}<label>Correo para entrar al panel<input name="login_email" type="email" value="{{ v.login_email or '' }}" maxlength="255" required></label>{% endif %}
+<label>Ciudad de la sede<input name="city" value="{{ v.city or '' }}" maxlength="80"></label>
+<label>Dirección de la sede<input name="address" value="{{ v.address or '' }}" maxlength="200"></label>
+<label class="wide">Ciudades o municipios donde reparte<input name="coverage" value="{{ v.coverage or '' }}" maxlength="500" placeholder="Bucaramanga, Floridablanca, Girón, Piedecuesta"></label>
+<fieldset class="wide">
+  <legend>Qué vende</legend>
+  <div class="day-options">
+    {% set chosen = (v.categories or '').split(',') %}
+    {% for key, label in provider_categories.items() %}
+    <label class="day-option"><input type="checkbox" name="categories" value="{{ key }}"{% if key in chosen %} checked{% endif %}><span>{{ label }}{% if key in regulated_categories %} ⚠️{% endif %}</span></label>
+    {% endfor %}
+  </div>
+</fieldset>
+{% endmacro %}

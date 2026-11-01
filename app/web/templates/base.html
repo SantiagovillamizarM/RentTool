@@ -39,6 +39,26 @@
       </div>
     </div>
   </header>
+  {% elif admin_active is defined %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/admin">
+        <img src="/panel/static/logo.png" alt="">
+        <span>TenderoBot<small>Administración</small></span>
+      </a>
+      <nav class="menu" aria-label="Secciones">
+        <a href="/admin" class="{{ 'on' if admin_active == 'overview' }}">Resumen</a>
+        <a href="/admin/solicitudes" class="{{ 'on' if admin_active == 'requests' }}">Solicitudes</a>
+        <a href="/admin/proveedores" class="{{ 'on' if admin_active == 'providers' }}">Proveedores</a>
+      </nav>
+      <div class="topbar-actions">
+        <span class="admin-pill">Administrador</span>
+        <form method="post" action="/admin/logout" class="logout">
+          <button type="submit">Salir</button>
+        </form>
+      </div>
+    </div>
+  </header>
   {% endif %}
   <main class="page">
     {% block content %}{% endblock %}

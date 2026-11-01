@@ -1,0 +1,12 @@
+{#- Mensaje después de una acción del administrador. Sin correo configurado, trae el enlace para copiarlo. -#}
+{% if flash %}
+<div class="notice flash">
+  <span>{{ flash.message }}</span>
+  {% if flash.link %}
+  <div class="copy-link">
+    <input value="{{ flash.link }}" readonly aria-label="Enlace para crear la contraseña" onclick="this.select()">
+    <button type="button" class="small-btn" onclick="navigator.clipboard && navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent = 'Copiado'">Copiar</button>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

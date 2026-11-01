@@ -100,3 +100,24 @@ def test_code_email_shows_the_code():
     email = verification.code_email("654321")
     assert "654321" in email.subject and "654321" in email.text
     assert "654 321" in email.html
+
+
+# --- Un papel por correo ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answers", "role"),
+    [
+        ([1], "admin"),  # es administrador
+        ([None, 7], "provider"),  # tiene cuenta de proveedor
+        ([None, None, 3], "provider"),  # tiene una solicitud de proveedor en revisión o aprobada
+        ([None, None, None, 5], "tendero"),  # tiene una tienda
+        ([None, None, None, None, 9], "tendero"),  # tiene una solicitud de tienda en revisión o aprobada
+        ([None, None, None, None, None], None),  # correo nuevo (o solo con solicitudes rechazadas)
+    ],
+)
+async def test_each_email_has_a_single_role(answers, role):
+    from app.web.public import email_role
+
+    assert await email_role(CodeSession(*answers), EMAIL) == role
